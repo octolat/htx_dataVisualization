@@ -95,11 +95,11 @@ def main():
 
             #18 seconds
             elif connection.topic == '/left_arm/arm_feedback'and True:
-                logUrdfToTransform(tree_joints, msg, "left")
+                log_urdfToTransform(tree_joints, msg, "left")
                 if print_times: print(f"joints: {time.time()-per}")
 
             elif connection.topic == '/right_arm/arm_feedback' and True:
-                logUrdfToTransform(tree_joints, msg, "right")
+                log_urdfToTransform(tree_joints, msg, "right")
                 if print_times: print(f"joints: {time.time()-per}")
 
             per = time.time()
@@ -161,8 +161,7 @@ def createHeatMap(heights, min, max):
     return colors
 
 
-
-def logUrdfToTransform(tree_joints, msg, prefix):
+def log_urdfToTransform(tree_joints, msg, prefix):
     for i in range(7): #TODO: errr maybe check if names are in order or sum
         pos = msg.position[i]
         if int(msg.name[i][-1]) % 2 == 0: #TODO: super breakable

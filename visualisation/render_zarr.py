@@ -140,7 +140,7 @@ def main():
     # log pictures
     imgs = file["data"]["img"][epi_start:epi_end]
     height, width, _ = imgs[0].shape
-    format = rr.components.ImageFormat(width=width, height=height, col          or_model="RGB", channel_datatype="U8")
+    format = rr.components.ImageFormat(width=width, height=height, color_model="RGB", channel_datatype="U8")
     rr.log("/camera/color/image_raw", rr.Image.from_fields(format=format), static=True)
     rr.send_columns(
         "images",
@@ -153,23 +153,15 @@ def main():
     batch_size, _ = points[0].shape
     xyz = points[:, :, :3] # array goes [x,y,z, r,g,b]
     colors = createHeatMap(points[:, :, 2], 0.0, 1.5)
-
-    len_array = np.full(selected_length, 3)
-    print(len_array.shape)
-    test = np.full((selected_length,3),100)
-    print(test.shape)
-
-    prt = test.partition(lengths=len_array)
-    
-    
     
     rr.send_columns(
         "/camera/depth/color/points",
         indexes=[rr.TimeColumn("tick", sequence=times)],
         columns=[
-            *rr.Points3D.columns(positions=xyz, radii=np.full(selected_length, 0.0008), colors=test),
+            *rr.Points3D.columns(positions=xyz, radii=np.full(selected_length, 0.0008)),
         ],
     )
+    #TODO: add heatmap
 
     
 
