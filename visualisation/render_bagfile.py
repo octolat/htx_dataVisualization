@@ -32,54 +32,41 @@ rr.spawn()
 def main():
     # init variables
     image_size = None
-    tree_joints = {
-        "left": None,
-        "right": None,
-    }
 
     #make blueprint nice
     rr.log_file_from_path(blueprint_path)
 
-    #get the timeline start time from first message
-    with Reader(bagpath) as reader:
-        for connection, timestamp, rawdata in reader.messages():
-            timestamp = np.datetime64(timestamp, "ns")
-            rr.set_time("bag_log_time", timestamp=timestamp)
-            break
+    #get static data 
+    static_data = init_getStaticDataFromBag(bagpath) #startTime, jointNames, gripperNames, imageSize
+
+    #set timeline to the start
+    rr.set_time("bag_log_time", timestamp=static_data["startTime"])
     
     # process and log urdf models
-    trees, paths = procAndInsertUrdf((urdf_path, gripper_urdf_path), ("arm", "gripper"), ("left", "right"))
-    print(paths)
+    trees, paths = scene_insertUrdf((urdf_path, gripper_urdf_path), ("arm", "gripper"), ("left", "right"))
 
-    # find mimic joints
-    gripper_mimic = {
-        "left": discoverMimicJoints(paths["gripper"]["left"]),
-        "right": discoverMimicJoints(paths["gripper"]["right"])
-    }
-    # print(gripper_mimic)
-    
-    # set camera frames
-    rr.log("/camera/depth/color/points", rr.CoordinateFrame("camera_frame"))
-    rr.log("/camera/color/image_raw", rr.CoordinateFrame("camera_frame"))
+    tree_joints = {}
+    for side in ["left", "right"]:
+        tree_joints[side] = {}
+        # get arm joints
+        tree_joints[side]["arm"] = init_getJoints(trees[side]["arm"], static_data["jointNames"][side])
 
-    # set scene transform
-    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.11453, 0.66634], #measured from cad
-                                               rotation = rr.RotationAxisAngle(axis=(1, 0, 0), degrees=207.5),
-                                               child_frame="camera_frame", parent_frame="tf#/"))
-    
-    rr.log("/scene_transforms", rr.Transform3D(translation=[-0.016, 0.0, 0.595], #measured from cad
-                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=-90),
-                                               child_frame="left_base_link", parent_frame="tf#/"))
-    rr.log("/scene_transforms", rr.Transform3D(translation=[0.016, 0.0, 0.595], 
-                                               rotation = rr.RotationAxisAngle(axis=(1, 0, 1), degrees=180),
-                                               child_frame="right_base_link", parent_frame="tf#/"))
+        # get gripper joints
+        mimic_joints = init_discoverMimicJoints(paths[side]["gripper"])["finger_joint"]
+        jointlist = []
+        # adding main driving joint
+        joint = init_getJoints(trees[side]["gripper"], ["finger_joint"])
+        joint.extend([1, 0])
+        jointlist.append(joint)
+        # adding mirrored joints
+        for name, multiplier, offset in mimic_joints:
+            joint = init_getJoints(trees[side]["gripper"], [name])
+            joint.extend([multiplier, offset])
+            jointlist.append(joint)
+        tree_joints[side]["gripper"] = jointlist
 
-    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.0, -0.06149039], #got this number from mujoco_menagerie 
-                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=180),
-                                               child_frame="right_robotiq_85_base_link", parent_frame="right_bracelet_link"))
-    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.0, -0.06149039], 
-                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=180),
-                                               child_frame="left_robotiq_85_base_link", parent_frame="left_bracelet_link"))
+    # set up the scene
+    scene_setup(paths)
 
     start = time.time()
     per = start
@@ -90,13 +77,11 @@ def main():
             msg = typestore.deserialize_cdr(rawdata, connection.msgtype)
             timestamp = np.datetime64(timestamp, "ns")
             rr.set_time("bag_log_time", timestamp=timestamp)
+
             #14 seconds
             if connection.topic == '/camera/color/image_raw' and True:
-                if image_size == None:
-                    image_size = (msg.height, msg.width)
-                    # rr.log("/camera/color/image_raw", rr.Pinhole(focal_length=1000, height=image_size[0], width=image_size[1]), static=True)
                 image = np.array(msg.data).reshape(msg.height, msg.width, 3)
-                rr.log("/camera/color/image_raw", rr.Image(bytes=image, datatype="u8", color_model="RGB", height=image_size[0], width = image_size[1]))
+                rr.log("/camera/color/image_raw", rr.Image(bytes=image, datatype="u8", color_model="RGB", height=static_data["imageSize"][0], width = static_data["imageSize"][1]))
                 if print_times: print(f"image: {time.time()-per}")
 
             #41.4951057434082 seconds, 31 without color, 20 without log
@@ -110,11 +95,11 @@ def main():
 
             #18 seconds
             elif connection.topic == '/left_arm/arm_feedback'and True:
-                logUrdfToTransform(trees["arm"]["left"], tree_joints["left"], trees["gripper"]["left"], gripper_mimic["left"], msg, "left")
+                logUrdfToTransform(tree_joints, msg, "left")
                 if print_times: print(f"joints: {time.time()-per}")
 
             elif connection.topic == '/right_arm/arm_feedback' and True:
-                logUrdfToTransform(trees["arm"]["right"], tree_joints["left"], trees["gripper"]["right"], gripper_mimic["right"], msg, "right")
+                logUrdfToTransform(tree_joints, msg, "right")
                 if print_times: print(f"joints: {time.time()-per}")
 
             per = time.time()
@@ -123,6 +108,10 @@ def main():
 
             
 
+
+            
+            
+            
 
 def convertPointCloud(msg):
     # TIME = time.time()
@@ -171,7 +160,94 @@ def createHeatMap(heights, min, max):
 
     return colors
 
-def addPrefixToUrdf(urdf_path, prefix):
+
+
+def logUrdfToTransform(tree_joints, msg, prefix):
+    for i in range(7): #TODO: errr maybe check if names are in order or sum
+        pos = msg.position[i]
+        if int(msg.name[i][-1]) % 2 == 0: #TODO: super breakable
+            # wrapes from 0 - 6.24 to -3.14 to 3.14 for non inf joints
+            if pos > 3.14: 
+                pos = pos - 6.28
+        rr.log(f"{prefix}/transforms", tree_joints[prefix]["arm"][i].compute_transform(pos))
+        rr.log(f"{prefix}/jointFeedback/{msg.name[i]}", rr.Scalars(msg.position[i]))
+
+    #TODO: this assumes gripper is present
+    for joint, multiplier, offset in tree_joints[prefix]["gripper"]:
+        tf = joint.compute_transform(msg.position[7] * multiplier + offset)
+        rr.log(f"{prefix}/transforms", tf)
+    rr.log(f"{prefix}/gripperFeedback/"+msg.name[7], rr.Scalars(msg.position[7]))
+
+
+
+
+def scene_insertUrdf(urdf_paths, names, prefixes):
+    #make urdf like left n right diffed
+    paths = {}
+    trees = {}
+    for side in prefixes:
+        paths[side] = {}
+        trees[side] = {}
+        for path, thing in zip(urdf_paths, names):
+            # make path
+            paths[side][thing] = init_addPrefixToUrdf(path, side)
+
+            # get tree
+            trees[side][thing] = rr.urdf.UrdfTree.from_file_path(paths[side][thing])
+
+    return trees, paths
+
+    
+    # for thing_path, name in zip(urdf_paths, names):
+    #     versions = {}
+    #     for pre in prefixes:
+    #         versions[pre] = init_addPrefixToUrdf(thing_path, pre)
+    #     thing_paths[name] = versions.copy()
+
+    # # import it to rerun
+    # thing_trees = {}
+    # for thing_name, paths in thing_paths.items():
+    #     versions = {}
+    #     for version_name, path in paths.items():
+    #         rr.log_file_from_path(path, static = True)
+    #         versions[version_name] = rr.urdf.UrdfTree.from_file_path(path)
+    #     thing_trees[thing_name] = versions.copy()
+
+    # return thing_trees , thing_paths
+
+
+def scene_setup(urdf_path_dict):
+    # insert urdfs
+    for side in urdf_path_dict.values():
+        for path in side.values():
+            rr.log_file_from_path(path, static = True)
+
+    # set camera frames
+    rr.log("/camera/depth/color/points", rr.CoordinateFrame("camera_frame"))
+    rr.log("/camera/color/image_raw", rr.CoordinateFrame("camera_frame"))
+
+    # set scene transform for camera 
+    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.11453, 0.66634], #measured from cad
+                                               rotation = rr.RotationAxisAngle(axis=(1, 0, 0), degrees=207.5),
+                                               child_frame="camera_frame", parent_frame="tf#/"))
+    
+    # transform for both arms
+    rr.log("/scene_transforms", rr.Transform3D(translation=[-0.016, 0.0, 0.595], #measured from cad
+                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=-90),
+                                               child_frame="left_base_link", parent_frame="tf#/"))
+    rr.log("/scene_transforms", rr.Transform3D(translation=[0.016, 0.0, 0.595], 
+                                               rotation = rr.RotationAxisAngle(axis=(1, 0, 1), degrees=180),
+                                               child_frame="right_base_link", parent_frame="tf#/"))
+
+    # mount gripper to the arm
+    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.0, -0.06149039], #got this number from mujoco_menagerie 
+                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=180),
+                                               child_frame="right_robotiq_85_base_link", parent_frame="right_bracelet_link"))
+    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.0, -0.06149039], 
+                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=180),
+                                               child_frame="left_robotiq_85_base_link", parent_frame="left_bracelet_link"))
+
+def init_addPrefixToUrdf(urdf_path, prefix):
     tree = et.parse(urdf_path)
     root = tree.getroot()
 
@@ -190,31 +266,51 @@ def addPrefixToUrdf(urdf_path, prefix):
     tree.write(new_path, encoding='UTF-8', xml_declaration=True)
     return new_path
 
-def logUrdfToTransform(urdf_tree, urdf_joints, gripper_tree, mimic_dict, msg, prefix):
-    if urdf_joints == None:
-        urdf_joints = [0]*7
-        for i in range(7): #TODO errr maybe change this, its liddat cause gripper +1 at the end
-            urdf_joints[i] = urdf_tree.get_joint_by_name(msg.name[i])   
-    for i in range(7):
-        pos = msg.position[i]
-        if int(msg.name[i][-1]) % 2 == 0: #TODO: super breakable
-            # wrapes from 0 - 6.24 to -3.14 to 3.14 for non inf joints
-            if pos > 3.14: 
-                pos = pos - 6.28
-        rr.log(f"{prefix}/transforms",urdf_joints[i].compute_transform(pos))
-        rr.log(f"{prefix}/jointFeedback/{msg.name[i]}", rr.Scalars(msg.position[i]))
+def init_getStaticDataFromBag(bagpath):
+    data = {
+        "startTime" : None,
+        "jointNames" : {"left": None, "right": None},
+        "gripperName" : {"left": None, "right": None},
+        "imageSize": None,
+    }
+    data_left = 4
+    with Reader(bagpath) as reader:
+        for connection, timestamp, rawdata in reader.messages():
+            msg = typestore.deserialize_cdr(rawdata, connection.msgtype)
+            time = np.datetime64(timestamp, "ns")
+            # feed in start time
+            if data["startTime"] == None:
+                data_left -= 1
+                data["startTime"] = time
 
-    #TODO: this assumes gripper is present
-    tf = gripper_tree.get_joint_by_name("finger_joint").compute_transform(msg.position[7])
-    rr.log(f"{prefix}/transforms", tf)
-    rr.log(f"{prefix}/gripperFeedback/"+msg.name[7], rr.Scalars(msg.position[7]))
-    # go through mimic joints
-    for name, multiplier, _ in mimic_dict["finger_joint"]:
-        tf = gripper_tree.get_joint_by_name(name).compute_transform(msg.position[7] * multiplier)
-        rr.log(f"{prefix}/transforms", tf)
+            # feed in right arm and gripper names
+            for side in ["left", "right"]:
+                if connection.topic == f"/{side}_arm/arm_feedback":
+                    if data["jointNames"][side] == None:
+                        data_left -= 1
+                        data["jointNames"][side] = msg.name[:-1]
+                        data["gripperName"][side] = msg.name[-1]
+
+            # feed in image size
+            if connection.topic == "/camera/color/image_raw":
+                if data["imageSize"] == None:
+                    data_left -= 1
+                    data["imageSize"] = (msg.height, msg.width)
 
 
-def discoverMimicJoints(urdf_path):
+            #check if all data is extracted
+            if data_left <= 0:
+                break
+        
+    return data
+
+def init_getJoints(urdf_tree, jointNames):
+    joints = []
+    for i, name in enumerate(jointNames): 
+        joints.append(urdf_tree.get_joint_by_name(name))
+    return joints
+
+def init_discoverMimicJoints(urdf_path):
     mimic_dict = {}
     tree = et.parse(urdf_path)
     root = tree.getroot()
@@ -230,26 +326,6 @@ def discoverMimicJoints(urdf_path):
 
     return mimic_dict
 
-def procAndInsertUrdf(urdf_paths, names, prefixes):
-    #make urdf like left n right diffed
-    thing_paths = {}
-    for thing_path, name in zip(urdf_paths, names):
-        versions = {}
-        for pre in prefixes:
-            versions[pre] = addPrefixToUrdf(thing_path, pre)
-        thing_paths[name] = versions.copy()
-
-    # import it to rerun
-    thing_trees = {}
-    for thing_name, paths in thing_paths.items():
-        versions = {}
-        for version_name, path in paths.items():
-            rr.log_file_from_path(path, static = True)
-            versions[version_name] = rr.urdf.UrdfTree.from_file_path(path)
-        thing_trees[thing_name] = versions.copy()
-
-    return thing_trees , thing_paths
-    
 
 
 
