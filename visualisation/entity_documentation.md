@@ -6,8 +6,8 @@ right arm+gripper: right/transforms
 ** Joint Feedback (state) **
 left arm: left/jointFeedback/joint_{jointnumber}
 right arm: right/jointFeedback/joint_{jointnumber}
-left gripper: left/gripperFeedback
-right gripper: right/gripperFeedback
+left gripper: left/gripperFeedback/{grippername}
+right gripper: right/gripperFeedback/{grippername}
 
 ** Joint Targets (actions) **
 not implemented

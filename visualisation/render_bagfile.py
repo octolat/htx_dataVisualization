@@ -89,7 +89,7 @@ def main():
                 points, colors = convertPointCloud(msg)
                 # print(colors)
                 #TODO: colors are all black
-                rr.log("/camera/depth/color/points", rr.Points3D(points, radii=[0.0008]*msg.width, colors=colors))    
+                rr.log("/camera/depth/color/points", rr.Points3D(points, radii=[0.0015]*msg.width, colors=colors))    
                 # rr.log("/camera/depth/color/points", rr.Points3D(points, radii=[0.0008]*msg.width))  
                 if print_times: print(f"points: {time.time()-per}")
 
@@ -195,24 +195,6 @@ def scene_insertUrdf(urdf_paths, names, prefixes):
             trees[side][thing] = rr.urdf.UrdfTree.from_file_path(paths[side][thing])
 
     return trees, paths
-
-    
-    # for thing_path, name in zip(urdf_paths, names):
-    #     versions = {}
-    #     for pre in prefixes:
-    #         versions[pre] = init_addPrefixToUrdf(thing_path, pre)
-    #     thing_paths[name] = versions.copy()
-
-    # # import it to rerun
-    # thing_trees = {}
-    # for thing_name, paths in thing_paths.items():
-    #     versions = {}
-    #     for version_name, path in paths.items():
-    #         rr.log_file_from_path(path, static = True)
-    #         versions[version_name] = rr.urdf.UrdfTree.from_file_path(path)
-    #     thing_trees[thing_name] = versions.copy()
-
-    # return thing_trees , thing_paths
 
 
 def scene_setup(urdf_path_dict):
