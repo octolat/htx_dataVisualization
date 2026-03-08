@@ -1,4 +1,3 @@
-from sys import version
 import time
 import numpy as np
 from pathlib import Path
@@ -11,8 +10,10 @@ import zarr
 
 # config here
 print_times = False
+times_name = "tick"
 zarrfolder_name = "training_data"
 episode_select = (0,1) #first episode (inclusive), last episode(exlusive)
+JOINT_NAMES = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7", "robotiq_2f_85"]
 
 # get file paths
 zarrpath = Path(__file__).parent / "data" / "zarr_files" / zarrfolder_name
@@ -24,17 +25,8 @@ blueprint_path = Path(__file__).parent / "resources" / "rerun_gen3_rosbag_parser
 # set up rerun
 rr.init("rerun_gen3_rosbag_parser")
 rr.spawn()
-# rr.save("output.rrd")
 
 def main():
-    # init variables
-    times_name = "tick"
-    image_size = None
-    tree_joints = {
-        "left": None,
-        "right": None,
-    }
-
     #make blueprint nice
     rr.log_file_from_path(blueprint_path)
 
@@ -42,100 +34,107 @@ def main():
     rr.set_time(times_name, sequence=0)
     
     # process and log urdf models
-    trees, paths = procAndInsertUrdf(
-        (urdf_path, gripper_urdf_path), 
-        ("arm", "gripper"), 
-        ("left", "right")
-        )
+    trees, paths = scene_insertUrdf((urdf_path, gripper_urdf_path), ("arm", "gripper"), ("left", "right"))
 
-    # find mimic joints
-    gripper_mimic = {
-        "left": discoverMimicJoints(paths["gripper"]["left"]),
-        "right": discoverMimicJoints(paths["gripper"]["right"])
-    }  
-    
-    # set camera frames
-    rr.log("/camera/depth/color/points", rr.CoordinateFrame("camera_frame"))
-    rr.log("/camera/color/image_raw", rr.CoordinateFrame("camera_frame"))
+    # get joints to use in transforms later
+    tree_joints = {}
+    for side in ["left", "right"]:
+        tree_joints[side] = {}
+        # get arm joints
+        tree_joints[side]["arm"] = init_getJoints(trees[side]["arm"], JOINT_NAMES)
 
-    # set scene transform
-    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.11453, 0.66634], #measured from cad
-                                               rotation = rr.RotationAxisAngle(axis=(1, 0, 0), degrees=207.5),
-                                               child_frame="camera_frame", parent_frame="tf#/"))
-    
-    rr.log("/scene_transforms", rr.Transform3D(translation=[-0.016, 0.0, 0.595], #measured from cad
-                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=-90),
-                                               child_frame="left_base_link", parent_frame="tf#/"))
-    rr.log("/scene_transforms", rr.Transform3D(translation=[0.016, 0.0, 0.595], 
-                                               rotation = rr.RotationAxisAngle(axis=(1, 0, 1), degrees=180),
-                                               child_frame="right_base_link", parent_frame="tf#/"))
+        # get gripper joints
+        mimic_joints = init_discoverMimicJoints(paths[side]["gripper"])["finger_joint"]
+        jointlist = []
+        # adding main driving joint
+        joint = init_getJoints(trees[side]["gripper"], ["finger_joint"])
+        joint.extend([1, 0])
+        jointlist.append(joint)
+        # adding mirrored joints
+        for name, multiplier, offset in mimic_joints:
+            joint = init_getJoints(trees[side]["gripper"], [name])
+            joint.extend([multiplier, offset])
+            jointlist.append(joint)
+        tree_joints[side]["gripper"] = jointlist
 
-    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.0, -0.06149039], #got this number from mujoco_menagerie 
-                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=180),
-                                               child_frame="right_robotiq_85_base_link", parent_frame="right_bracelet_link"))
-    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.0, -0.06149039], 
-                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=180),
-                                               child_frame="left_robotiq_85_base_link", parent_frame="left_bracelet_link"))
+    # set up the scene
+    scene_setup(paths)
 
-    start = time.time()
-    # extracting the data
+    # extract from zarr now
     file = zarr.open(zarrpath, mode="r")
 
     # find range to be rendered
-    episodes = file["meta"]["episode_ends"]
-    if episodes.shape[0] < episode_select[1] or episode_select[0] < 0:
-        raise ValueError(f"episode_select is out of range, there are only {episodes.shape[0]} episodes")
+    epi_start, epi_end, epi_length = init_getEpisodeRange(file, episode_select)
     
-    if episode_select[0] == 0: 
-        epi_start = 0
-    else: 
-        epi_start = episodes[episode_select[0]-1]+1
-
-    total_length = file["data"]["action"].shape[0]
-    if episode_select[1] == episodes.shape[0]: 
-        epi_end = total_length #note: epi_end is exclusive, points at the idx AFTER the range
-    else: 
-        epi_end = episodes[episode_select[1]-1]
-    selected_length = epi_end - epi_start
-
-    # define time series n transform list
-    times = np.arange(selected_length)
-    urdf_transform_dict = {
-        "left_arm": [],
-        "left_gripper": [],
-        "right_arm": [],
-        "right_gripper": [],
-    }
+    # define timeline column
+    times = np.arange(epi_length)
 
     # log actions
-    JOINT_NAMES = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7", "robotiq_2f_85"]
     actions = file["data"]["state"][epi_start:epi_end]
-    arm_act_dict = {
-        "left/jointFeedback": actions[:, :7], #first 7
-        "right/jointFeedback": actions[:, 8:15], # 9th to 15th
+    act_dict = {
+        "left": (actions[:, :7], actions[:, -2]), #first 8
+        "right": (actions[:, 7:-2], actions[:, -1]), # next 8
     }
-    for entity_path, act in arm_act_dict.items():
-        tf = []
+    for side, act in act_dict.items():
+        arm_act, gripper_act = act
+        # log arm
         for i in range(7):
-            joint_act = act[:, i]
+            joint_act = arm_act[:, i]
             rr.send_columns(
-                f"{entity_path}/{JOINT_NAMES[i]}",
+                f"/{side}/jointFeedback/{JOINT_NAMES[i]}",
                 indexes=[rr.TimeColumn(times_name, sequence=times)],
                 columns=rr.Scalars.columns(scalars=joint_act),
             )
-            #TODO: compute transform for urdf
 
-    gripper_act_dict = {
-        "left/gripperFeedback": actions[:, 7:8], #8th
-        "right/gripperFeedback": actions[:, 15:16], #last (16th)
-    }
-    for entity_path, act in gripper_act_dict.items():
+        # log gripper
         rr.send_columns(
-                f"{entity_path}/{JOINT_NAMES[7]}",
-                indexes=[rr.TimeColumn(times_name, sequence=times)],
-                columns=rr.Scalars.columns(scalars=act),
-            )
-        #TODO: compute transform for urdf
+            f"/{side}/gripperFeedback/{JOINT_NAMES[-1]}",
+            indexes=[rr.TimeColumn(times_name, sequence=times)],
+            columns=rr.Scalars.columns(scalars=gripper_act),
+        )
+
+    # compute and log transforms
+    for side, acts in act_dict.items():
+        arm_transforms = gripper_transforms = {}
+        for dict in (arm_transforms, gripper_transforms):
+            for key in ("translation","quaternion","child_frame","parent_frame"):
+                dict[key] = []
+
+        arm_acts, gripper_acts = acts
+        for arm_act, gripper_act in zip(arm_acts, gripper_acts):
+            
+            joint_count = 0
+            # compute arm
+            for i, joint_act in enumerate(arm_act):
+                joint_count += 1
+                # wrapes from 0 - 6.24 to -3.14 to 3.14 for non inf joints
+                if joint_act % 2 == 0 and joint_act > 3.14: #TODO: super breakable
+                    joint_act = joint_act - 6.28
+                joint = tree_joints[side]["arm"][i]
+                params = init_unpackTransformObject(joint.compute_transform(joint_act))
+                for key, value in params.items():
+                    arm_transforms[key].append(value)
+
+            # compute gripper
+            for joint, multiplier, offset in tree_joints[side]["gripper"]:
+                joint_count +=1
+                tf = joint.compute_transform(gripper_act * multiplier + offset)
+                params = init_unpackTransformObject(tf)
+                for key, value in params.items():
+                    gripper_transforms[key].append(value)
+
+        # send to rerun
+        rr.send_columns(
+            f"{side}/transforms",
+            indexes=[rr.TimeColumn(times_name, sequence=times.repeat(joint_count))],
+            columns=rr.Transform3D.columns(
+                translation=arm_transforms["translation"],
+                quaternion=arm_transforms["quaternion"],
+                child_frame=arm_transforms["child_frame"],
+                parent_frame=arm_transforms["parent_frame"],
+            ),
+        )
+        
 
     # log pictures
     imgs = file["data"]["img"][epi_start:epi_end]
@@ -143,34 +142,41 @@ def main():
     format = rr.components.ImageFormat(width=width, height=height, color_model="RGB", channel_datatype="U8")
     rr.log("/camera/color/image_raw", rr.Image.from_fields(format=format), static=True)
     rr.send_columns(
-        "images",
+        "/camera/color/image_raw",
         indexes=[rr.TimeColumn(times_name, sequence=times)],
         columns=rr.Image.columns(buffer=imgs.reshape(len(times), -1)),
     )
 
     # log point 
     points = file["data"]["point_cloud"][epi_start:epi_end]
-    batch_size, _ = points[0].shape
     xyz = points[:, :, :3] # array goes [x,y,z, r,g,b]
     colors = createHeatMap(points[:, :, 2], 0.0, 1.5)
+    print(colors.shape)
+    print(xyz.shape)
     
     rr.send_columns(
         "/camera/depth/color/points",
         indexes=[rr.TimeColumn("tick", sequence=times)],
         columns=[
-            *rr.Points3D.columns(positions=xyz, radii=np.full(selected_length, 0.0008)),
+            *rr.Points3D.columns(positions=xyz.reshape(-1, 3), colors=colors.reshape(-1, 3)).partition(lengths=np.full(epi_length, xyz.shape[1])),
+            *rr.Points3D.columns(radii=np.full(epi_length, 0.0015)),
         ],
     )
-    #TODO: add heatmap
+
+
+        
+            
+                
+
 
     
-
-
-
-
-    # print(time.time()-start)
     
 
+            
+
+
+            
+   
 
 def createHeatMap(heights, min, max):
     # normalize to [0, 1] and clamp 
@@ -179,12 +185,74 @@ def createHeatMap(heights, min, max):
     blue   = (t * 255).astype(np.uint8)
     green = np.zeros(blue.shape, dtype=np.uint8)   
     red  = ((1.0 - t) * 255).astype(np.uint8)
-    colors = np.stack([red, green, blue], axis=-1)
+    colors = np.stack([red, green, blue], axis=2)
 
     return colors
-            
 
-def addPrefixToUrdf(urdf_path, prefix):
+
+
+
+
+
+def scene_insertUrdf(urdf_paths, names, prefixes):
+    #make urdf like left n right diffed
+    paths = {}
+    trees = {}
+    for side in prefixes:
+        paths[side] = {}
+        trees[side] = {}
+        for path, thing in zip(urdf_paths, names):
+            # make path
+            paths[side][thing] = init_addPrefixToUrdf(path, side)
+
+            # get tree
+            trees[side][thing] = rr.urdf.UrdfTree.from_file_path(paths[side][thing])
+
+    return trees, paths
+
+
+def scene_setup(urdf_path_dict):
+    # insert urdfs
+    for side in urdf_path_dict.values():
+        for path in side.values():
+            rr.log_file_from_path(path, static = True)
+
+    # set camera frames
+    rr.log("/camera/depth/color/points", rr.CoordinateFrame("camera_frame"))
+    rr.log("/camera/color/image_raw", rr.CoordinateFrame("camera_frame"))
+
+    # set scene transform for camera 
+    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.11453, 0.66634], #measured from cad
+                                               rotation = rr.RotationAxisAngle(axis=(1, 0, 0), degrees=207.5),
+                                               child_frame="camera_frame", parent_frame="tf#/"))
+    
+    # transform for both arms
+    rr.log("/scene_transforms", rr.Transform3D(translation=[-0.016, 0.0, 0.595], #measured from cad
+                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=-90),
+                                               child_frame="left_base_link", parent_frame="tf#/"))
+    rr.log("/scene_transforms", rr.Transform3D(translation=[0.016, 0.0, 0.595], 
+                                               rotation = rr.RotationAxisAngle(axis=(1, 0, 1), degrees=180),
+                                               child_frame="right_base_link", parent_frame="tf#/"))
+
+    # mount gripper to the arm
+    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.0, -0.06149039], #got this number from mujoco_menagerie 
+                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=180),
+                                               child_frame="right_robotiq_85_base_link", parent_frame="right_bracelet_link"))
+    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.0, -0.06149039], 
+                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=180),
+                                               child_frame="left_robotiq_85_base_link", parent_frame="left_bracelet_link"))
+
+def init_unpackTransformObject(tf):
+    params = {
+        "translation": tf.translation.as_arrow_array()[0].as_py(),
+        "quaternion": tf.quaternion.as_arrow_array()[0].as_py(),
+        "child_frame": tf.child_frame.as_arrow_array()[0].as_py(),
+        "parent_frame": tf.parent_frame.as_arrow_array()[0].as_py(),
+    }
+    return params
+
+
+def init_addPrefixToUrdf(urdf_path, prefix):
     tree = et.parse(urdf_path)
     root = tree.getroot()
 
@@ -203,31 +271,29 @@ def addPrefixToUrdf(urdf_path, prefix):
     tree.write(new_path, encoding='UTF-8', xml_declaration=True)
     return new_path
 
-def logUrdfToTransform(urdf_tree, urdf_joints, gripper_tree, mimic_dict, msg, prefix):
-    if urdf_joints == None:
-        urdf_joints = [0]*7
-        for i in range(7): #TODO errr maybe change this, its liddat cause gripper +1 at the end
-            urdf_joints[i] = urdf_tree.get_joint_by_name(msg.name[i])   
-    for i in range(7):
-        pos = msg.position[i]
-        if int(msg.name[i][-1]) % 2 == 0: #TODO: super breakable
-            # wrapes from 0 - 6.24 to -3.14 to 3.14 for non inf joints
-            if pos > 3.14: 
-                pos = pos - 6.28
-        rr.log(f"{prefix}/transforms",urdf_joints[i].compute_transform(pos))
-        rr.log(f"{prefix}/jointFeedback/"+msg.name[i], rr.Scalars(msg.position[i]))
+def init_getEpisodeRange(file, episode_select):
+    episodes = file["meta"]["episode_ends"]
+    if episodes.shape[0] < episode_select[1] or episode_select[0] < 0:
+        raise ValueError(f"episode_select is out of range, there are only {episodes.shape[0]} episodes")
+    if episode_select[0] == 0: 
+        epi_start = 0
+    else: 
+        epi_start = episodes[episode_select[0]-1]+1
+    total_length = file["data"]["action"].shape[0]
+    if episode_select[1] == episodes.shape[0]: 
+        epi_end = total_length #note: epi_end is exclusive, points at the idx AFTER the range
+    else: 
+        epi_end = episodes[episode_select[1]-1]
+    selected_length = epi_end - epi_start
+    return (epi_start, epi_end, selected_length)
 
-    #TODO: this assumes gripper is present
-    tf = gripper_tree.get_joint_by_name("finger_joint").compute_transform(msg.position[7])
-    rr.log(f"{prefix}/transforms", tf)
-    rr.log(f"{prefix}/gripperFeedback/"+msg.name[7], rr.Scalars(msg.position[7]))
-    # go through mimic joints
-    for name, multiplier, _ in mimic_dict["finger_joint"]:
-        tf = gripper_tree.get_joint_by_name(name).compute_transform(msg.position[7] * multiplier)
-        rr.log(f"{prefix}/transforms", tf)
+def init_getJoints(urdf_tree, jointNames):
+    joints = []
+    for i, name in enumerate(jointNames): 
+        joints.append(urdf_tree.get_joint_by_name(name))
+    return joints
 
-
-def discoverMimicJoints(urdf_path):
+def init_discoverMimicJoints(urdf_path):
     mimic_dict = {}
     tree = et.parse(urdf_path)
     root = tree.getroot()
@@ -243,26 +309,6 @@ def discoverMimicJoints(urdf_path):
 
     return mimic_dict
 
-def procAndInsertUrdf(urdf_paths, names, prefixes):
-    #make urdf like left n right diffed
-    thing_paths = {}
-    for thing_path, name in zip(urdf_paths, names):
-        versions = {}
-        for pre in prefixes:
-            versions[pre] = addPrefixToUrdf(thing_path, pre)
-        thing_paths[name] = versions.copy()
-
-    # import it to rerun
-    thing_trees = {}
-    for thing_name, paths in thing_paths.items():
-        versions = {}
-        for version_name, path in paths.items():
-            rr.log_file_from_path(path, static = True)
-            versions[version_name] = rr.urdf.UrdfTree.from_file_path(path)
-        thing_trees[thing_name] = versions.copy()
-
-    return thing_trees , thing_paths
-    
 
 
 
