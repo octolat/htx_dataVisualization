@@ -13,7 +13,7 @@ from rosbags.typesys import Stores, get_typestore
 # config here
 print_times = False
 
-typestore = get_typestore(Stores.ROS2_HUMBLE)
+
 bagfolder_name = "B-KING37-RQ2F85-L515-R-L_TBLTP_P_RSTART-BLUBTL-LOCR_2026-03-02-15-54-56_S"
 bagfile_name = "B-KING37-RQ2F85-L515-R-L_TBLTP_P_RSTART-BLUBTL-LOCR_2026-03-02-15-54-56_0"
 bagpath = Path(__file__).parent / "data" / "rawbags" / f"{bagfolder_name}" / f"{bagfile_name}.db3"
@@ -24,20 +24,24 @@ blueprint_path = Path(__file__).parent / "resources" / "rerun_gen3_rosbag_parser
 
 
 
-# set up rerun
-rr.init("rerun_gen3_rosbag_parser")
-rr.spawn()
-# rr.save("output.rrd")
+def render(configs):
+    #init variables
+    bagpath = Path(configs["datapath"])
+    print_times = configs["print_times"]
+    urdf_path, gripper_urdf_path = Path(configs["urdf_path"]), Path(configs["gripper_urdf_path"])
+    blueprint_path = Path(configs["blueprint_path"])
 
-def main():
-    # init variables
-    image_size = None
+    typestore = get_typestore(Stores.ROS2_HUMBLE)
+
+    # set up rerun
+    rr.init("rerun_gen3_rosbag_parser")
+    rr.spawn()
 
     #make blueprint nice
     rr.log_file_from_path(blueprint_path)
 
     #get static data 
-    static_data = init_getStaticDataFromBag(bagpath) #startTime, jointNames, gripperNames, imageSize
+    static_data = init_getStaticDataFromBag(bagpath, typestore) #startTime, jointNames, gripperNames, imageSize
 
     #set timeline to the start
     rr.set_time("bag_log_time", timestamp=static_data["startTime"])
@@ -84,7 +88,7 @@ def main():
                 rr.log("/camera/color/image_raw", rr.Image(bytes=image, datatype="u8", color_model="RGB", height=static_data["imageSize"][0], width = static_data["imageSize"][1]))
                 if print_times: print(f"image: {time.time()-per}")
 
-            #41.4951057434082 seconds, 31 without color, 20 without log
+            # #41.4951057434082 seconds, 31 without color, 20 without log
             elif connection.topic == '/camera/depth/color/points'and True:
                 points, colors = convertPointCloud(msg)
                 # print(colors)
@@ -105,9 +109,6 @@ def main():
             per = time.time()
     print(time.time()-start)
     
-
-            
-
 
             
             
@@ -178,8 +179,6 @@ def log_urdfToTransform(tree_joints, msg, prefix):
     rr.log(f"{prefix}/gripperFeedback/"+msg.name[7], rr.Scalars(msg.position[7]))
 
 
-
-
 def scene_insertUrdf(urdf_paths, names, prefixes):
     #make urdf like left n right diffed
     paths = {}
@@ -195,7 +194,6 @@ def scene_insertUrdf(urdf_paths, names, prefixes):
             trees[side][thing] = rr.urdf.UrdfTree.from_file_path(paths[side][thing])
 
     return trees, paths
-
 
 def scene_setup(urdf_path_dict):
     # insert urdfs
@@ -247,7 +245,7 @@ def init_addPrefixToUrdf(urdf_path, prefix):
     tree.write(new_path, encoding='UTF-8', xml_declaration=True)
     return new_path
 
-def init_getStaticDataFromBag(bagpath):
+def init_getStaticDataFromBag(bagpath, typestore):
     data = {
         "startTime" : None,
         "jointNames" : {"left": None, "right": None},
@@ -306,37 +304,3 @@ def init_discoverMimicJoints(urdf_path):
             mimic_dict[parent].append( (joint.attrib["name"], int(mimic.attrib["multiplier"]), int(mimic.attrib["offset"])))
 
     return mimic_dict
-
-
-
-
-main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-'''
-[sensor_msgs__msg__PointField(name='x', offset=0, datatype=7, count=1, INT8=1, UINT8=2, INT16=3, UINT16=4, INT32=5, UINT32=6, FLOAT32=7, FLOAT64=8, __msgtype__='sensor_msgs/msg/PointField'), 
-sensor_msgs__msg__PointField(name='y', offset=4, datatype=7, count=1, INT8=1, UINT8=2, INT16=3, UINT16=4, INT32=5, UINT32=6, FLOAT32=7, FLOAT64=8, __msgtype__='sensor_msgs/msg/PointField'), 
-sensor_msgs__msg__PointField(name='z', offset=8, datatype=7, count=1, INT8=1, UINT8=2, INT16=3, UINT16=4, INT32=5, UINT32=6, FLOAT32=7, FLOAT64=8, __msgtype__='sensor_msgs/msg/PointField'), 
-sensor_msgs__msg__PointField(name='rgb', offset=16, datatype=7, count=1, INT8=1, UINT8=2, INT16=3, UINT16=4, INT32=5, UINT32=6, FLOAT32=7, FLOAT64=8, __msgtype__='sensor_msgs/msg/PointField')]
- is_bigendian=False, point_step=20, row_step=9863680, data=array([126,  63,  93, ...,  92,  82,   0], shape=(9863680,), dtype=uint8), is_dense=True, 
-'''

@@ -1,0 +1,16 @@
+# launch settings
+datatype: "zarr" #zarr or rosbag
+datapath: "./data/zarr_files/training_data/"
+# datatype: "rosbag" #zarr or rosbag
+# datapath: ./data/rawbags/B-KING37-RQ2F85-L515-R-L_TBLTP_P_BLUBTL-LOC4_2026-02-26-18-11-11_S/B-KING37-RQ2F85-L515-R-L_TBLTP_P_BLUBTL-LOC4_2026-02-26-18-11-11_0.db3
+print_times: True
+
+# zarr only
+episode_select: [0,1] #first episode (inclusive), last episode(exlusive)
+times_name: "tick"
+joint_names: ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7", "robotiq_2f_85"]
+
+# resource paths
+urdf_path: "./resources/gen3_urdf/urdf/gen3.urdf"
+gripper_urdf_path: "./resources/robotiq-2f-85_urdf/urdf/robotiq-2f-85.urdf"
+blueprint_path: "./resources/rerun_gen3_rosbag_parser.rbl"

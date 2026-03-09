@@ -7,26 +7,21 @@ import rerun as rr
 import rerun.blueprint as rrb
 
 import zarr
+import yaml
 
-# config here
-print_times = False
-times_name = "tick"
-zarrfolder_name = "training_data"
-episode_select = (0,1) #first episode (inclusive), last episode(exlusive)
-JOINT_NAMES = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7", "robotiq_2f_85"]
+def render(configs):
+    #init variables
+    zarrpath = Path(configs["datapath"])
+    print_times = configs["print_times"]
+    times_name, joint_names = configs["times_name"], configs["joint_names"]
+    episode_select = configs["episode_select"]
+    urdf_path, gripper_urdf_path = Path(configs["urdf_path"]), Path(configs["gripper_urdf_path"])
+    blueprint_path = Path(configs["blueprint_path"])
 
-# get file paths
-zarrpath = Path(__file__).parent / "data" / "zarr_files" / zarrfolder_name
+    # set up rerun
+    rr.init("rerun_gen3_rosbag_parser")
+    rr.spawn()
 
-urdf_path = Path(__file__).parent / "resources" / "gen3_urdf" / "urdf" / "gen3.urdf"
-gripper_urdf_path = Path(__file__).parent / "resources" / "robotiq-2f-85_urdf" / "urdf" / "robotiq-2f-85.urdf"
-blueprint_path = Path(__file__).parent / "resources" / "rerun_gen3_rosbag_parser.rbl"
-
-# set up rerun
-rr.init("rerun_gen3_rosbag_parser")
-rr.spawn()
-
-def main():
     #make blueprint nice
     rr.log_file_from_path(blueprint_path)
 
@@ -41,7 +36,7 @@ def main():
     for side in ["left", "right"]:
         tree_joints[side] = {}
         # get arm joints
-        tree_joints[side]["arm"] = init_getJoints(trees[side]["arm"], JOINT_NAMES)
+        tree_joints[side]["arm"] = init_getJoints(trees[side]["arm"], joint_names)
 
         # get gripper joints
         mimic_joints = init_discoverMimicJoints(paths[side]["gripper"])["finger_joint"]
@@ -60,6 +55,8 @@ def main():
     # set up the scene
     scene_setup(paths)
 
+    start = time.time()
+    per = start
     # extract from zarr now
     file = zarr.open(zarrpath, mode="r")
 
@@ -68,6 +65,7 @@ def main():
     
     # define timeline column
     times = np.arange(epi_length)
+
 
     # log actions
     actions = file["data"]["state"][epi_start:epi_end]
@@ -81,17 +79,19 @@ def main():
         for i in range(7):
             joint_act = arm_act[:, i]
             rr.send_columns(
-                f"/{side}/jointFeedback/{JOINT_NAMES[i]}",
+                f"/{side}/jointFeedback/{joint_names[i]}",
                 indexes=[rr.TimeColumn(times_name, sequence=times)],
                 columns=rr.Scalars.columns(scalars=joint_act),
             )
 
         # log gripper
         rr.send_columns(
-            f"/{side}/gripperFeedback/{JOINT_NAMES[-1]}",
+            f"/{side}/gripperFeedback/{joint_names[-1]}",
             indexes=[rr.TimeColumn(times_name, sequence=times)],
             columns=rr.Scalars.columns(scalars=gripper_act),
         )
+    if print_times: print(f"joint states: {time.time()-per}")
+    per = time.time()
 
     # compute and log transforms
     for side, acts in act_dict.items():
@@ -134,7 +134,8 @@ def main():
                 parent_frame=arm_transforms["parent_frame"],
             ),
         )
-        
+    if print_times: print(f"transforms: {time.time()-per}")
+    per = time.time()        
 
     # log pictures
     imgs = file["data"]["img"][epi_start:epi_end]
@@ -146,13 +147,14 @@ def main():
         indexes=[rr.TimeColumn(times_name, sequence=times)],
         columns=rr.Image.columns(buffer=imgs.reshape(len(times), -1)),
     )
+    if print_times: print(f"pictures: {time.time()-per}")
+    per = time.time()
+
 
     # log point 
     points = file["data"]["point_cloud"][epi_start:epi_end]
     xyz = points[:, :, :3] # array goes [x,y,z, r,g,b]
     colors = createHeatMap(points[:, :, 2], 0.0, 1.5)
-    print(colors.shape)
-    print(xyz.shape)
     
     rr.send_columns(
         "/camera/depth/color/points",
@@ -162,7 +164,10 @@ def main():
             *rr.Points3D.columns(radii=np.full(epi_length, 0.0015)),
         ],
     )
+    if print_times: print(f"points: {time.time()-per}")
+    per = time.time()
 
+    if print_times: print(f"total: {time.time()-start}")
 
         
             
@@ -188,10 +193,6 @@ def createHeatMap(heights, min, max):
     colors = np.stack([red, green, blue], axis=2)
 
     return colors
-
-
-
-
 
 
 def scene_insertUrdf(urdf_paths, names, prefixes):
@@ -312,7 +313,7 @@ def init_discoverMimicJoints(urdf_path):
 
 
 
-main()
+
 
 
 
