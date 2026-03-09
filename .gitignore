@@ -1,4 +1,5 @@
 /visualisation/rerun-venv
 /visualisation/zarr_examples
+/visualisation/render_bagfile_columnlar.py
 /backup
 /visualisation/data/*/*
