@@ -1,0 +1,6 @@
+./backup
+.git
+.gitignore
+./visualisation/data
+./visualisation/rerun-venv
+./visualisation/zarr_examples
