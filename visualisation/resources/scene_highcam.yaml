@@ -11,6 +11,6 @@ right_arm:
   rotation_degree: 180
 
 camera: 
-  translation: [0.0, 0.215, 1.07]
+  translation: [0.0, 0.36, 1.01]
   rotation_axis: [1, 0, 0]
   rotation_degree: 180
