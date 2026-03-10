@@ -21,7 +21,12 @@ timeline: bag_log_time
 transformations: /scene_transforms
 
 
-
+rosbag topic names
+/camera/color/image_raw
+/camera/depth/color/points
+/camera/depth/color/points
+/left_arm/arm_feedback
+/right_arm/arm_feedback
 
 dependencies
 rerun-sdk
