@@ -1,0 +1,16 @@
+#translations in meters, xyz
+
+left_arm: 
+  translation: [-0.016, 0.0, 0.595]
+  rotation_axis: [0, 1, 0]
+  rotation_degree: -90
+
+right_arm: 
+  translation: [0.016, 0.0, 0.595]
+  rotation_axis: [1, 0, 1]
+  rotation_degree: 180
+
+camera: 
+  translation: [0.0, 0.215, 1.07]
+  rotation_axis: [1, 0, 0]
+  rotation_degree: 180

@@ -2,6 +2,7 @@ import time
 import numpy as np
 from pathlib import Path
 import xml.etree.ElementTree as et
+import yaml
 
 import rerun as rr
 import rerun.blueprint as rrb
@@ -15,8 +16,11 @@ def render(configs):
     print_times = configs["print_times"]
     times_name, joint_names = configs["times_name"], configs["joint_names"]
     episode_select = configs["episode_select"]
+    scene_path = Path(configs["scene_path"])
     urdf_path, gripper_urdf_path = Path(configs["urdf_path"]), Path(configs["gripper_urdf_path"])
     blueprint_path = Path(configs["blueprint_path"])
+    point_radii = configs["point_radii"]
+    point_colorscheme = configs["point_colorscheme"]
 
     # set up rerun
     rr.init("rerun_gen3_rosbag_parser")
@@ -53,7 +57,7 @@ def render(configs):
         tree_joints[side]["gripper"] = jointlist
 
     # set up the scene
-    scene_setup(paths)
+    scene_setup(paths, scene_path)
 
     start = time.time()
     per = start
@@ -160,10 +164,19 @@ def render(configs):
         "/camera/depth/color/points",
         indexes=[rr.TimeColumn("tick", sequence=times)],
         columns=[
-            *rr.Points3D.columns(positions=xyz.reshape(-1, 3), colors=colors.reshape(-1, 3)).partition(lengths=np.full(epi_length, xyz.shape[1])),
-            *rr.Points3D.columns(radii=np.full(epi_length, 0.0015)),
+            *rr.Points3D.columns(positions=xyz.reshape(-1, 3)).partition(lengths=np.full(epi_length, xyz.shape[1])),
+            *rr.Points3D.columns(radii=np.full(epi_length, point_radii)),
         ],
     )
+    if point_colorscheme == "heatmap":
+        rr.send_columns(
+            "/camera/depth/color/points",
+            indexes=[rr.TimeColumn("tick", sequence=times)],
+            columns=[
+                *rr.Points3D.columns(colors=colors.reshape(-1, 3)).partition(lengths=np.full(epi_length, xyz.shape[1]))
+            ],
+        )
+
     if print_times: print(f"points: {time.time()-per}")
     per = time.time()
 
@@ -212,7 +225,11 @@ def scene_insertUrdf(urdf_paths, names, prefixes):
     return trees, paths
 
 
-def scene_setup(urdf_path_dict):
+def scene_setup(urdf_path_dict, scene_path):
+    #get configs
+    with open(scene_path, 'r') as file:
+        scene_dict = yaml.safe_load(file)
+
     # insert urdfs
     for side in urdf_path_dict.values():
         for path in side.values():
@@ -223,16 +240,16 @@ def scene_setup(urdf_path_dict):
     rr.log("/camera/color/image_raw", rr.CoordinateFrame("camera_frame"))
 
     # set scene transform for camera 
-    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.11453, 0.66634], #measured from cad
-                                               rotation = rr.RotationAxisAngle(axis=(1, 0, 0), degrees=207.5),
+    rr.log("/scene_transforms", rr.Transform3D(translation=scene_dict["camera"]["translation"], #measured from cad
+                                               rotation = rr.RotationAxisAngle(axis=scene_dict["camera"]["rotation_axis"], degrees=scene_dict["camera"]["rotation_degree"]),
                                                child_frame="camera_frame", parent_frame="tf#/"))
     
     # transform for both arms
-    rr.log("/scene_transforms", rr.Transform3D(translation=[-0.016, 0.0, 0.595], #measured from cad
-                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=-90),
+    rr.log("/scene_transforms", rr.Transform3D(translation=scene_dict["left_arm"]["translation"], #measured from cad
+                                               rotation = rr.RotationAxisAngle(axis=scene_dict["left_arm"]["rotation_axis"], degrees=scene_dict["left_arm"]["rotation_degree"]),
                                                child_frame="left_base_link", parent_frame="tf#/"))
-    rr.log("/scene_transforms", rr.Transform3D(translation=[0.016, 0.0, 0.595], 
-                                               rotation = rr.RotationAxisAngle(axis=(1, 0, 1), degrees=180),
+    rr.log("/scene_transforms", rr.Transform3D(translation=scene_dict["right_arm"]["translation"], 
+                                               rotation = rr.RotationAxisAngle(axis=scene_dict["right_arm"]["rotation_axis"], degrees=scene_dict["right_arm"]["rotation_degree"]),
                                                child_frame="right_base_link", parent_frame="tf#/"))
 
     # mount gripper to the arm

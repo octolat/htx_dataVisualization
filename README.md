@@ -22,9 +22,13 @@ in the ```htx_visualisation``` folder run ```docker build -t rerun:0.30.0 .```
 `joint_names`: an array consiting of the joint names + gripper name. used to find arm joints in urdf, as well as to define entitiy paths for each arm joint as well as gripper  
 -- this section is only used when using processing zarr files --  
 
+`scene_path`: path from ./visusalisation to yaml decribing the transform of the arm n camera  
 `urdf_path`: path from ./visusalisation to arm urdf  
 `gripper_urdf_path`: path from ./visusalisation to gripper urdf  
 `blueprint_path`: path from ./visusalisation to blueprint file (.rbl)  
+
+`point_radii`: size of the points of the pointcloud in m  
+`point_colorscheme`: color scheme of the points. mono makes it all green, heatmap makes it blue to red based on z height  
 
 ### supported files
 #### rosbags 
