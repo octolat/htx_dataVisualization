@@ -9,3 +9,6 @@ with open('config.yaml', 'r') as file:
         render_zarr.render(loaded_data)
     elif loaded_data["datatype"] == "rosbag":
         render_bagfile_row.render(loaded_data)
+
+print("data loaded, enter to quit")
+input()
