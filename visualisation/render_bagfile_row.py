@@ -11,19 +11,7 @@ from rosbags.rosbag2 import Reader
 from rosbags.typesys import Stores, get_typestore
 
 # config here
-print_times = False
-
-
-bagfolder_name = "B-KING37-RQ2F85-L515-R-L_TBLTP_P_RSTART-BLUBTL-LOCR_2026-03-02-15-54-56_S"
-bagfile_name = "B-KING37-RQ2F85-L515-R-L_TBLTP_P_RSTART-BLUBTL-LOCR_2026-03-02-15-54-56_0"
-bagpath = Path(__file__).parent / "data" / "rawbags" / f"{bagfolder_name}" / f"{bagfile_name}.db3"
-
-urdf_path = Path(__file__).parent / "resources" / "gen3_urdf" / "urdf" / "gen3.urdf"
-gripper_urdf_path = Path(__file__).parent / "resources" / "robotiq-2f-85_urdf" / "urdf" / "robotiq-2f-85.urdf"
-blueprint_path = Path(__file__).parent / "resources" / "rerun_gen3_rosbag_parser.rbl"
-
-
-
+GRIPPER_NAME = "robotiq_2f_85"
 def render(configs):
     #init variables
     bagpath = Path(configs["datapath"])
@@ -45,7 +33,6 @@ def render(configs):
 
     #get static data 
     static_data = init_getStaticDataFromBag(bagpath, typestore) #startTime, jointNames, gripperNames, imageSize
-
     #set timeline to the start
     rr.set_time("bag_log_time", timestamp=static_data["startTime"])
     
@@ -104,11 +91,11 @@ def render(configs):
 
             #18 seconds
             elif connection.topic == '/left_arm/arm_feedback'and True:
-                log_urdfToTransform(tree_joints, msg, "left")
+                log_urdfToTransform(tree_joints, msg, "left", static_data["gripperName"]["left"])
                 if print_times: print(f"joints: {time.time()-per}")
 
             elif connection.topic == '/right_arm/arm_feedback' and True:
-                log_urdfToTransform(tree_joints, msg, "right")
+                log_urdfToTransform(tree_joints, msg, "right", static_data["gripperName"]["right"])
                 if print_times: print(f"joints: {time.time()-per}")
 
             per = time.time()
@@ -169,7 +156,7 @@ def createHeatMap(heights, min, max):
     return colors
 
 
-def log_urdfToTransform(tree_joints, msg, prefix):
+def log_urdfToTransform(tree_joints, msg, prefix, gripper):
     for i in range(7): #TODO: errr maybe check if names are in order or sum
         pos = msg.position[i]
         if int(msg.name[i][-1]) % 2 == 0: #TODO: super breakable
@@ -180,10 +167,11 @@ def log_urdfToTransform(tree_joints, msg, prefix):
         rr.log(f"{prefix}/jointFeedback/{msg.name[i]}", rr.Scalars(msg.position[i]))
 
     #TODO: this assumes gripper is present
-    for joint, multiplier, offset in tree_joints[prefix]["gripper"]:
-        tf = joint.compute_transform(msg.position[7] * multiplier + offset)
-        rr.log(f"{prefix}/transforms", tf)
-    rr.log(f"{prefix}/gripperFeedback/"+msg.name[7], rr.Scalars(msg.position[7]))
+    if gripper != None:
+        for joint, multiplier, offset in tree_joints[prefix]["gripper"]:
+            tf = joint.compute_transform(msg.position[7] * multiplier + offset)
+            rr.log(f"{prefix}/transforms", tf)
+        rr.log(f"{prefix}/gripperFeedback/"+msg.name[7], rr.Scalars(msg.position[7]))
 
 
 def scene_insertUrdf(urdf_paths, names, prefixes):
@@ -278,8 +266,13 @@ def init_getStaticDataFromBag(bagpath, typestore):
                 if connection.topic == f"/{side}_arm/arm_feedback":
                     if data["jointNames"][side] == None:
                         data_left -= 1
-                        data["jointNames"][side] = msg.name[:-1]
-                        data["gripperName"][side] = msg.name[-1]
+                        if msg.name[-1] == GRIPPER_NAME:
+                            data["jointNames"][side] = msg.name[:-1]
+                            data["gripperName"][side] = GRIPPER_NAME
+                        else:
+                            data["jointNames"][side] = msg.name[:]
+                            data["gripperName"][side] = None
+                        
 
             # feed in image size
             if connection.topic == "/camera/color/image_raw":
