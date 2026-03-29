@@ -1,14 +1,16 @@
+from multiprocessing import process
 import time
 import numpy as np
 from pathlib import Path
 import xml.etree.ElementTree as et
-import yaml
 
 import rerun as rr
 import rerun.blueprint as rrb
 
 import zarr
 import yaml
+
+from helpers import createHeatMap, processUrdf, sceneSetup
 
 def render(configs):
     #init variables
@@ -22,50 +24,32 @@ def render(configs):
     point_radii = configs["point_radii"]
     point_colorscheme = configs["point_colorscheme"]
 
-    # set up rerun
-    rr.init("rerun_gen3_rosbag_parser")
-    rr.spawn()
-
-    #make blueprint nice
-    rr.log_file_from_path(blueprint_path)
 
     #set the timeline 
     rr.set_time(times_name, sequence=0)
     
-    # process and log urdf models
-    trees, paths = scene_insertUrdf((urdf_path, gripper_urdf_path), ("arm", "gripper"), ("left", "right"))
+    # process urdf models
+    urdf_data = {
+        "urdf_paths": (urdf_path, gripper_urdf_path),
+        "urdf_names": ("arm", "gripper"),
+        "driving_joints": (joint_names, "finger_joint"), #not a list means it will auto search for mimic joints
+        "prefix_names": ("left", "right"),
 
-    # get joints to use in transforms later
-    tree_joints = {}
-    for side in ["left", "right"]:
-        tree_joints[side] = {}
-        # get arm joints
-        tree_joints[side]["arm"] = init_getJoints(trees[side]["arm"], joint_names)
-
-        # get gripper joints
-        mimic_joints = init_discoverMimicJoints(paths[side]["gripper"])["finger_joint"]
-        jointlist = []
-        # adding main driving joint
-        joint = init_getJoints(trees[side]["gripper"], ["finger_joint"])
-        joint.extend([1, 0])
-        jointlist.append(joint)
-        # adding mirrored joints
-        for name, multiplier, offset in mimic_joints:
-            joint = init_getJoints(trees[side]["gripper"], [name])
-            joint.extend([multiplier, offset])
-            jointlist.append(joint)
-        tree_joints[side]["gripper"] = jointlist
+    }
+    tree_joints, paths = processUrdf(urdf_data)
 
     # set up the scene
-    scene_setup(paths, scene_path)
+    sceneSetup(paths, scene_path)
 
+    # for speed tracking
     start = time.time()
     per = start
+
     # extract from zarr now
     file = zarr.open(zarrpath, mode="r")
 
     # find range to be rendered
-    epi_start, epi_end, epi_length = init_getEpisodeRange(file, episode_select)
+    epi_start, epi_end, epi_length = getEpisodeRange(file, episode_select)
     
     # define timeline column
     times = np.arange(epi_length)
@@ -97,7 +81,8 @@ def render(configs):
     if print_times: print(f"joint states: {time.time()-per}")
     per = time.time()
 
-    # compute and log transforms
+
+    # log transforms
     for side, acts in act_dict.items():
         arm_transforms = gripper_transforms = {}
         for dict in (arm_transforms, gripper_transforms):
@@ -115,7 +100,7 @@ def render(configs):
                 if joint_act % 2 == 0 and joint_act > 3.14: #TODO: super breakable
                     joint_act = joint_act - 6.28
                 joint = tree_joints[side]["arm"][i]
-                params = init_unpackTransformObject(joint.compute_transform(joint_act))
+                params = unpackTransformObject(joint.compute_transform(joint_act))
                 for key, value in params.items():
                     arm_transforms[key].append(value)
 
@@ -123,7 +108,7 @@ def render(configs):
             for joint, multiplier, offset in tree_joints[side]["gripper"]:
                 joint_count +=1
                 tf = joint.compute_transform(gripper_act * multiplier + offset)
-                params = init_unpackTransformObject(tf)
+                params = unpackTransformObject(tf)
                 for key, value in params.items():
                     gripper_transforms[key].append(value)
 
@@ -139,7 +124,8 @@ def render(configs):
             ),
         )
     if print_times: print(f"transforms: {time.time()-per}")
-    per = time.time()        
+    per = time.time()  
+
 
     # log pictures
     imgs = file["data"]["img"][epi_start:epi_end]
@@ -176,9 +162,9 @@ def render(configs):
                 *rr.Points3D.columns(colors=colors.reshape(-1, 3)).partition(lengths=np.full(epi_length, xyz.shape[1]))
             ],
         )
-
     if print_times: print(f"points: {time.time()-per}")
     per = time.time()
+
 
     if print_times: print(f"total: {time.time()-start}")
 
@@ -189,78 +175,7 @@ def render(configs):
 
     
     
-
-            
-
-
-            
-   
-
-def createHeatMap(heights, min, max):
-    # normalize to [0, 1] and clamp 
-    t = np.clip((heights - min) / (max - min), 0.0, 1.0)
-
-    blue   = (t * 255).astype(np.uint8)
-    green = np.zeros(blue.shape, dtype=np.uint8)   
-    red  = ((1.0 - t) * 255).astype(np.uint8)
-    colors = np.stack([red, green, blue], axis=2)
-
-    return colors
-
-
-def scene_insertUrdf(urdf_paths, names, prefixes):
-    #make urdf like left n right diffed
-    paths = {}
-    trees = {}
-    for side in prefixes:
-        paths[side] = {}
-        trees[side] = {}
-        for path, thing in zip(urdf_paths, names):
-            # make path
-            paths[side][thing] = init_addPrefixToUrdf(path, side)
-
-            # get tree
-            trees[side][thing] = rr.urdf.UrdfTree.from_file_path(paths[side][thing])
-
-    return trees, paths
-
-
-def scene_setup(urdf_path_dict, scene_path):
-    #get configs
-    with open(scene_path, 'r') as file:
-        scene_dict = yaml.safe_load(file)
-
-    # insert urdfs
-    for side in urdf_path_dict.values():
-        for path in side.values():
-            rr.log_file_from_path(path, static = True)
-
-    # set camera frames
-    rr.log("/camera/depth/color/points", rr.CoordinateFrame("camera_frame"))
-    rr.log("/camera/color/image_raw", rr.CoordinateFrame("camera_frame"))
-
-    # set scene transform for camera 
-    rr.log("/scene_transforms", rr.Transform3D(translation=scene_dict["camera"]["translation"], #measured from cad
-                                               rotation = rr.RotationAxisAngle(axis=scene_dict["camera"]["rotation_axis"], degrees=scene_dict["camera"]["rotation_degree"]),
-                                               child_frame="camera_frame", parent_frame="tf#/"))
-    
-    # transform for both arms
-    rr.log("/scene_transforms", rr.Transform3D(translation=scene_dict["left_arm"]["translation"], #measured from cad
-                                               rotation = rr.RotationAxisAngle(axis=scene_dict["left_arm"]["rotation_axis"], degrees=scene_dict["left_arm"]["rotation_degree"]),
-                                               child_frame="left_base_link", parent_frame="tf#/"))
-    rr.log("/scene_transforms", rr.Transform3D(translation=scene_dict["right_arm"]["translation"], 
-                                               rotation = rr.RotationAxisAngle(axis=scene_dict["right_arm"]["rotation_axis"], degrees=scene_dict["right_arm"]["rotation_degree"]),
-                                               child_frame="right_base_link", parent_frame="tf#/"))
-
-    # mount gripper to the arm
-    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.0, -0.06149039], #got this number from mujoco_menagerie 
-                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=180),
-                                               child_frame="right_robotiq_85_base_link", parent_frame="right_bracelet_link"))
-    rr.log("/scene_transforms", rr.Transform3D(translation=[0.0, 0.0, -0.06149039], 
-                                               rotation = rr.RotationAxisAngle(axis=(0, 1, 0), degrees=180),
-                                               child_frame="left_robotiq_85_base_link", parent_frame="left_bracelet_link"))
-
-def init_unpackTransformObject(tf):
+def unpackTransformObject(tf):
     params = {
         "translation": tf.translation.as_arrow_array()[0].as_py(),
         "quaternion": tf.quaternion.as_arrow_array()[0].as_py(),
@@ -270,26 +185,7 @@ def init_unpackTransformObject(tf):
     return params
 
 
-def init_addPrefixToUrdf(urdf_path, prefix):
-    tree = et.parse(urdf_path)
-    root = tree.getroot()
-
-    #rename root attribute (which becomes the parent entitiy path for everything else)
-    root.attrib["name"] = f"{prefix}_{root.attrib["name"]}"
-
-    #rename every fucking link (because the link name becomes the frame name for the link)
-    for child in root:
-        if child.tag == "link":
-            child.attrib["name"] = f"{prefix}_{child.attrib["name"]}"
-        elif child.tag == "joint":
-            child.find('parent').attrib["link"] = f"{prefix}_{child.find('parent').attrib["link"]}"
-            child.find('child').attrib["link"] = f"{prefix}_{child.find('child').attrib["link"]}"
-    
-    new_path = urdf_path.parent / f"{prefix}_{urdf_path.name}"
-    tree.write(new_path, encoding='UTF-8', xml_declaration=True)
-    return new_path
-
-def init_getEpisodeRange(file, episode_select):
+def getEpisodeRange(file, episode_select):
     episodes = file["meta"]["episode_ends"]
     if episodes.shape[0] < episode_select[1] or episode_select[0] < 0:
         raise ValueError(f"episode_select is out of range, there are only {episodes.shape[0]} episodes")
@@ -305,27 +201,6 @@ def init_getEpisodeRange(file, episode_select):
     selected_length = epi_end - epi_start
     return (epi_start, epi_end, selected_length)
 
-def init_getJoints(urdf_tree, jointNames):
-    joints = []
-    for i, name in enumerate(jointNames): 
-        joints.append(urdf_tree.get_joint_by_name(name))
-    return joints
-
-def init_discoverMimicJoints(urdf_path):
-    mimic_dict = {}
-    tree = et.parse(urdf_path)
-    root = tree.getroot()
-
-    for joint in root.findall("joint"):
-        mimic = joint.find("mimic")
-        if mimic != None:
-            parent = mimic.attrib["joint"]
-            if not parent in mimic_dict:
-                mimic_dict[parent] = []
-            #dict value is a list of (child mimic joint name, multipler, offset)
-            mimic_dict[parent].append( (joint.attrib["name"], int(mimic.attrib["multiplier"]), int(mimic.attrib["offset"])))
-
-    return mimic_dict
 
 
 
