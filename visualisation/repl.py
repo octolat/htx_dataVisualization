@@ -198,7 +198,7 @@ class REPL(Cmd):
                 return yaml.safe_load(file)
         else:
             print(f"ERROR: couldnt find \"config.yaml\" in the {Path(__file__).parent} directory. Please make sure it is present.")
-            self.do_quit()
+            self.do_quit("")
 
     def _openDict(self, prefix, datas):
         seperator = "  "
