@@ -152,7 +152,7 @@ class REPL(Cmd):
         print("\tidx:\tsize:\tfoldername")
         for idx, p in enumerate(sorted(rosbag_dir.iterdir())):
             if p.is_dir():
-                size = "NIL"
+                size = -1
                 files = p.glob(f"*{self._getConfig()["rosbag_type"]}")
                 for file in files:
                     size = file.stat().st_size/1e9
