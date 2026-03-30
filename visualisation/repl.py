@@ -60,34 +60,30 @@ class REPL(Cmd):
 
 
     def do_rosbag(self, args):
-        """Visualises a rosbag file. Args: foldername/number(optional)
-                foldername/number ->  name or number of the bagfile directory (not the .db3 itself but the directory it is in) Should be in rosbag data dir spesified in config. (tab completion avaliable)
+        """Visualises a rosbag file. Args: groupfoldername/number(optional), bagfoldername/number(optional)
+                groupfoldername/number -> name or number of the group folder
+                bagfoldername/number -> name or number of the bagfile directory (not the .db3 itself but the directory it is in) Should be in rosbag data dir spesified in config.
             call \"rosbag\" to see all avaliable bagfile directory names/numbers.
             """
         args = args.split()
         if len(args) == 0:
             # search 
-            print(f"call rosbag <number | foldername>. Avaliable folders are:")
-            self._printAvaliableRosbags()
+            print(f"call rosbag <number | groupname>. Avaliable folders are:")
+            self._printAvaliableRosbags(None)
         else:
-            folder = args[0]
-            if folder.isdigit():
-                folder = int(folder)
-                rosbag_dir = Path(self._getConfig()["rosbag_dir"])
-                folders = list(sorted(rosbag_dir.iterdir()))
-                if folder < 0 or folder >= len(folders):
-                    print("ERROR: idx selection out of bounds.")
-                    return
-                dir = folders[folder]
-                
+            groupFile = self._getNameFromInput(args[0])
+            if len(args) == 1:  
+                print(f"call rosbag <number | groupname> <number | bagfoldername>. Avaliable folders are:")
+                self._printAvaliableRosbags(groupFile)
             else:
-                dir = Path(self._getConfig()["rosbag_dir"]) / folder
-            
-            for item in dir.iterdir():
-                if item.suffix == self._getConfig()["rosbag_type"]:
-                    path = dir.name + "/" + item.name
-
-            self._render("rosbag", path)
+                bagFile = self._getNameFromInput(args[1], groupFile)
+                dir = Path(self._getConfig()["rosbag_dir"]) / groupFile / bagFile
+                for item in dir.iterdir():
+                    if item.suffix == self._getConfig()["rosbag_type"]:
+                        path = groupFile + "/" + bagFile + "/" + item.name
+                        self._render("rosbag", path)
+                        return
+                print(f"ERROR: couldnt find {self._getConfig()["rosbag_type"]} file")
 
     def complete_rosbag(self, text, line, begidx, endidx):
         if line.find(" ") > begidx:
@@ -103,32 +99,24 @@ class REPL(Cmd):
         args = args.split()
         if len(args) == 0:
             # search 
-            print(f"call info_rosbag <number | foldername>. Avaliable folders are:")
-            self._printAvaliableRosbags()
+            print(f"call rosbag <number | groupname>. Avaliable folders are:")
+            self._printAvaliableRosbags(None)
         else:
-            folder = args[0]
-            if folder.isdigit():
-                folder = int(folder)
-                rosbag_dir = Path(self._getConfig()["rosbag_dir"])
-                folders = list(sorted(rosbag_dir.iterdir()))
-                if folder < 0 or folder >= len(folders):
-                    print("ERROR: idx selection out of bounds.")
-                    return
-                dir = folders[folder]
-                
+            groupFile = self._getNameFromInput(args[0])
+            if len(args) == 1:  
+                print(f"call rosbag <number | groupname> <number | bagfoldername>. Avaliable folders are:")
+                self._printAvaliableRosbags(groupFile)
             else:
-                dir = Path(self._getConfig()["rosbag_dir"]) / folder
-            
-
-
-            for item in dir.iterdir():
-                if item.name == "metadata.yaml":
-                    with item.open("r") as file:
-                        data = yaml.safe_load(file)
-                        print(data)
-                        self._openDict("", data)
-                    return
-            print("Error: Metadata not found")
+                bagFile = self._getNameFromInput(args[1], groupFile)
+                dir = Path(self._getConfig()["rosbag_dir"]) / groupFile / bagFile
+                for item in dir.iterdir():
+                    if item.name == "metadata.yaml":
+                        with item.open("r") as file:
+                            data = yaml.safe_load(file)
+                            print(data)
+                            self._openDict("", data)
+                        return
+                print("Error: Metadata not found")
 
     def do_info_config(self, args):
         """Prints the current configuration of the visualizer. Updates are reflected immediately upon next visualising call"""
@@ -147,12 +135,32 @@ class REPL(Cmd):
     def postcmd(self, stop, line):
         print()
 
-    def _printAvaliableRosbags(self):
-        rosbag_dir = Path(self._getConfig()["rosbag_dir"])
+    def _getNameFromInput(self, folder, prefix=None):
+        """ returns file name not path """
+        if folder.isdigit():
+            folder = int(folder)
+            if prefix != None:
+                rosbag_dir = Path(self._getConfig()["rosbag_dir"]) / prefix
+            else:
+                rosbag_dir = Path(self._getConfig()["rosbag_dir"])
+            folders = list(sorted(rosbag_dir.iterdir()))
+            if folder < 0 or folder >= len(folders):
+                print("ERROR: idx selection out of bounds.")
+                return
+            file = folders[folder].name
+        else:
+            file = folder
+        return file
+
+    def _printAvaliableRosbags(self, level):
+        if level != None:
+            rosbag_dir = Path(self._getConfig()["rosbag_dir"]) / level
+        else:
+            rosbag_dir = Path(self._getConfig()["rosbag_dir"])
         print("\tidx:\tsize:\tfoldername")
         for idx, p in enumerate(sorted(rosbag_dir.iterdir())):
             if p.is_dir():
-                size = -1
+                size = 0
                 files = p.glob(f"*{self._getConfig()["rosbag_type"]}")
                 for file in files:
                     size = file.stat().st_size/1e9
