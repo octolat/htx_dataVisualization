@@ -40,7 +40,7 @@ class REPL(Cmd):
             return []
         
         zarr_dir = Path(self._getConfig()["zarr_dir"])
-        return [str(p) for p in zarr_dir.iterdir() if p.name.startswith(text)]
+        return [p.name for p in zarr_dir.iterdir() if p.name.startswith(text)]
     
     def do_info_zarr(self, args):
         """Prints meta data of a zarr file. Args: foldername(optional)
