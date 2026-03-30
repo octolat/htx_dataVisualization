@@ -22,18 +22,18 @@ class REPL(Cmd):
             print(f"call zarr <foldername>. Avaliable folders are:")
             self._printAvaliableZarrs()
         else:
+            episode_select = [0, 1]
             try:
-                episode_select = [0, 1]
                 if len(args) > 1:
                     episode_select[0] = int(args[1])
                 if len(args) > 2:
                     episode_select[1] = episode_select[0] + int(args[2])
 
-                new_info = {"episode_select": episode_select}
-
-                self._render("zarr", args[0], new_info)
             except:
                 print("ERROR: Please input integers only. Type help.")
+                return
+            new_info = {"episode_select": episode_select}
+            self._render("zarr", args[0], new_info)
 
     def complete_zarr(self, text, line, begidx, endidx):
         if line.find(" ") > begidx:
@@ -85,12 +85,12 @@ class REPL(Cmd):
                         return
                 print(f"ERROR: couldnt find {self._getConfig()["rosbag_type"]} file")
 
-    def complete_rosbag(self, text, line, begidx, endidx):
-        if line.find(" ") > begidx:
-            return []
+    # def complete_rosbag(self, text, line, begidx, endidx):
+    #     if line.find(" ") > begidx:
+    #         return []
         
-        rosbag_dir = Path(self._getConfig()["zarr_dir"])
-        return [str(p) for p in rosbag_dir.iterdir() if p.name.startswith(text)]
+    #     rosbag_dir = Path(self._getConfig()["zarr_dir"])
+    #     return [str(p) for p in rosbag_dir.iterdir() if p.name.startswith(text)]
         
     def do_info_rosbag(self, args):
         """Prints meta data of a rosbag file. Args: foldername/number(optional)
