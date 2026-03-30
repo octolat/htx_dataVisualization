@@ -1,5 +1,5 @@
-zarr_dir: "./data/zarr_files"
-rosbag_dir: "./data/rawbags"
+zarr_dir: "./data/zarrfiles"
+rosbag_dir: "./data/rosbags"
 rosbag_type: ".db3"
 
 
