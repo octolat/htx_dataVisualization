@@ -1,4 +1,0 @@
-output_bags:
-- uri: /visualisation/outputbags/bag1  # required
-  storage_id: "mcap"  # will use the default storage plugin, if unspecified
-  all_topics: true

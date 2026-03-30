@@ -1,12 +1,12 @@
-# launch settings
-datatype: "zarr" #zarr or rosbag
-datapath: "./data/zarr_files/training_data/"
-# datatype: "rosbag" #zarr or rosbag
-# datapath: ./data/rawbags/B-KING37-RQ2F85-L515-R-L_TBLTP_P_BLUBTL-LOC4_2026-02-26-18-11-11_S/B-KING37-RQ2F85-L515-R-L_TBLTP_P_BLUBTL-LOC4_2026-02-26-18-11-11_0.db3
+zarr_dir: "./data/zarr_files"
+rosbag_dir: "./data/rawbags"
+rosbag_type: ".db3"
+
+
 print_times: True
+arm_dof: 7
 
 # zarr only
-episode_select: [0,1] #first episode (inclusive), last episode(exlusive)
 times_name: "tick"
 joint_names: ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7", "robotiq_2f_85"]
 
@@ -14,7 +14,8 @@ joint_names: ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", 
 scene_path: "./resources/scene_highcam.yaml"
 urdf_path: "./resources/gen3_urdf/urdf/gen3.urdf"
 gripper_urdf_path: "./resources/robotiq-2f-85_urdf/urdf/robotiq-2f-85.urdf"
-blueprint_path: "./resources/rerun_gen3_rosbag_parser.rbl"
+blueprint_path: "./resources/kinova_bimanual_setup.rbl"
+application_id: "kinova_bimanual_setup"
 
 # visual preferences
 point_radii: 0.0015

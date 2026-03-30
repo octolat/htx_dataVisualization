@@ -6,18 +6,21 @@ in the ```htx_visualisation``` folder run ```docker build -t rerun:0.30.0 .```
 
 ## Running the visualiser
 1. Edit the ```./run_visualiser.sh``` file to change the data volume mount location to where your data is. (hint: 2nd last line)
-2. Edit the ```config.yaml``` (mostly look at the datatype, datapath, and episode_select (for zarr only) parameters)
+2. Edit the ```config.yaml``` (mostly look at the zarr and rosbag data dir)
 3. In the ```htx_visualisation``` folder run ```./run_visualiser.sh```
-4. press enter to quit
+4. type quit to quit
 
 ## info
+
 ### config file parameters
-`datatype`: either "zarr" or "rosbag"  
-`datapath`: path from ./visusalisation to your data. should be a folder for zarr, and a bagfile for rosbags  
+`zarr_dir`: path from ./visusalisation to directory containing zarr files
+`rosbag_dir`: path from ./visusalisation to directory containing rosbag files
+`rosbag_type`: the extenstion of the rosbag file. ".db3" for example
+
 `print_times`: whether to print debugging info about the amount of time logging took  
+`arm_dof`: number of joints in the arm. used to distinguish gripper from arm
 
 -- this section is only used when using processing zarr files --  
-`episode_select`: an array [first episode, last episode+1] to choose the range of episodes to view
 `times_name`: name of the timeline   
 `joint_names`: an array consiting of the joint names + gripper name. used to find arm joints in urdf, as well as to define entitiy paths for each arm joint as well as gripper  
 -- this section is only used when using processing zarr files --  
@@ -26,6 +29,7 @@ in the ```htx_visualisation``` folder run ```docker build -t rerun:0.30.0 .```
 `urdf_path`: path from ./visusalisation to arm urdf  
 `gripper_urdf_path`: path from ./visusalisation to gripper urdf  
 `blueprint_path`: path from ./visusalisation to blueprint file (.rbl)  
+`application_id`: "kinova_bimanual_setup"
 
 `point_radii`: size of the points of the pointcloud in m  
 `point_colorscheme`: color scheme of the points. mono makes it all green, heatmap makes it blue to red based on z height  
@@ -53,3 +57,6 @@ must follow anzac's convertor's format
 └── meta
   └── episode_ends (~,) int64
 ```  
+
+## assumptions
+- joint names for left and right are identical
