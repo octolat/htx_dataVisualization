@@ -8,6 +8,9 @@ import render_zarr
 import render_rosbag
 
 class REPL(Cmd):
+    def __init__(self):
+        super().__init__()
+        self._recordingCount = 0
 
     def do_zarr(self, args):
         """Visualises a zarr file. Args: foldername(optional), episode_start(optional), episode_num(optional)
@@ -176,6 +179,7 @@ class REPL(Cmd):
 
     def _render(self, type, name, args={}):
         # get configs
+        self._recordingCount += 1
         loaded_data = self._getConfig()
         for key, value in args.items():
             loaded_data[key] = value
@@ -187,7 +191,7 @@ class REPL(Cmd):
             return
 
         # set up rerun
-        rr.init(loaded_data["application_id"])
+        rr.init(loaded_data["application_id"], recording_id=str(self._recordingCount))
         rr.spawn()
 
         # make blueprint nice
