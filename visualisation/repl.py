@@ -373,4 +373,4 @@ if __name__ == '__main__':
     Update --> you can now type "n" (for next) and "p" (for previous) to step through episodes. -siewling 
     !!!
     """
-    # prompt.cmdloop()
+    prompt.cmdloop()
