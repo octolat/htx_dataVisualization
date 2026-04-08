@@ -1,4 +1,5 @@
 from cmd import Cmd
+from dis import Instruction
 import rerun as rr
 import yaml
 from pathlib import Path
@@ -11,108 +12,136 @@ class REPL(Cmd):
     def __init__(self):
         super().__init__()
         self._recordingCount = 0
+        self.renderConfig = {
+            "fileType": None,
+            "filePath": None,
+            "episode": None,
+        }
+
+
 
     def do_zarr(self, args):
-        """Visualises a zarr file. Args: foldername(optional), episode_start(optional), episode_num(optional)
+        # yo like make it n  and p type keys for both zarr and rosbag
+        """Visualises a zarr file. 
+            Args: <foldername | idx>, {episode_select}
                 foldername -> name of the zarr folder. Should be in zarr data dir spesified in config. (tab completion avaliable)
-                episode_start -> idx of episode to visualise. Defaults to 0
-                episode_num -> number of episodes to visualise. Defaults to 1
-            Call \"zarr\" to see avaliable foldernames.
+                episode_select(optional) -> idx of episode to visualise. Defaults to 0
+            Usage:
+                zarr --> lists all avaliable folders in the zarr dir
+                zarr <foldername | idx> --> renders the zarr, episode 0
+                zarr <foldername | idx> <episode_select> --> renders the zarr, episode you provided
             """
+        # get file from args
         args = args.split()
-        if len(args) == 0:
-            # search 
-            print(f"call zarr <foldername>. Avaliable folders are:")
-            self._printAvaliableZarrs()
-        else:
-            episode_select = [0, 1]
-            try:
-                if len(args) > 1:
-                    episode_select[0] = int(args[1])
-                if len(args) > 2:
-                    episode_select[1] = episode_select[0] + int(args[2])
+        instruction = "usage: zarr <foldername | idx> {episode_select}. Avaliable folders are:"
+        file = self._fileSelection(args, instruction, "zarr")
 
-            except:
-                print("ERROR: Please input integers only. Type help.")
-                return
-            new_info = {"episode_select": episode_select}
-            self._render("zarr", args[0], new_info)
+        # render file
+        if file != None:
+            episode = 0
+            if len(args) > 1:
+                #check if its a int
+                if args[1].isdigit():
+                    episode = int(args[1])
+                else:
+                    print("ERROR: Please input integers only. Type help.")
+                    return
 
-    def complete_zarr(self, text, line, begidx, endidx):
-        if line.find(" ") > begidx:
-            return []
-        
-        zarr_dir = Path(self._getConfig()["zarr_dir"])
-        return [p.name for p in zarr_dir.iterdir() if p.name.startswith(text)]
+
+            self.renderConfig["fileType"] = "zarr"
+            self.renderConfig["filePath"] = file
+            self.renderConfig["episode"] = episode
+
+            self._render()
     
     def do_info_zarr(self, args):
-        """Prints meta data of a zarr file. Args: foldername(optional)
+        """Prints meta data of a zarr file. 
+            Args: <foldername | idx> 
                 foldername -> name of the zarr folder. Should be in zarr data dir spesified in config. 
-            Call \"zarr\" to see avaliable foldernames.
+            Usage:
+                info_zarr --> lists all avaliable folders in the zarr dir
+                zarr <foldername | idx> --> prints the metadata tree of the provided zarr
             """
+        # get file from args
         args = args.split()
-        if len(args) == 0:
-            print(f"call info_zarr <foldername>. Avaliable folders are:")
-            self._printAvaliableZarrs()
-        else:
-            file = Path(self._getConfig()["zarr_dir"]) / args[0]
-            if file.is_dir():
-                print(zarr.open(str(file), mode="r").tree())
-            else:
-                print("ERROR: file doesnt exist")
+        instruction = "usage: info_zarr <foldername | idx>. Avaliable folders are:"
+        file = self._fileSelection(args, instruction, "zarr")
+        if file != None:
+            print(zarr.open(str(file), mode="r").tree())
+
+    def complete_zarr(self, text, line, begidx, endidx):
+        return self._autocompleteZarr(text, line, begidx, endidx, "zarr")
+    
+    def complete_zarr_info(self, text, line, begidx, endidx):
+        return self._autocompleteZarr(text, line, begidx, endidx, "zarr")
+
+
+
+
 
 
     def do_rosbag(self, args):
-        """Visualises a rosbag file. Args: groupfoldername/number(optional), bagfoldername/number(optional)
-                groupfoldername/number -> name or number of the group folder
-                bagfoldername/number -> name or number of the bagfile directory (not the .db3 itself but the directory it is in) Should be in rosbag data dir spesified in config.
-            call \"rosbag\" to see all avaliable bagfile directory names/numbers.
+        """Visualises a rosbag file. 
+            Args: <foldername | idx>, <bagfilename | episode_number>
+                foldername -> name or idx of the group folder
+                bagfilename -> name or idx of the spesific rosbag to render / episode number (idx == episode number)
+            Usage:
+                rosbag --> lists all avaliable folders in the rosbag dir
+                rosbag <foldername | idx> --> lists all avaliable bagfiles
+                rosbag <foldername | idx> <bagfilename | episode_number> --> renders the rosbag/episode you provided
             """
+        
+        # get file from args
         args = args.split()
-        if len(args) == 0:
-            # search 
-            print(f"call rosbag <number | groupname>. Avaliable folders are:")
-            self._printAvaliableRosbags(None)
-        else:
-            groupFile = self._getNameFromInput(args[0])
-            if len(args) == 1:  
-                print(f"call rosbag <number | groupname> <number | bagfoldername>. Avaliable folders are:")
-                self._printAvaliableRosbags(groupFile)
-            else:
-                bagFile = self._getNameFromInput(args[1], groupFile)
-                dir = Path(self._getConfig()["rosbag_dir"]) / groupFile / bagFile
-                for item in dir.iterdir():
-                    if item.suffix == self._getConfig()["rosbag_type"]:
-                        path = groupFile + "/" + bagFile + "/" + item.name
-                        self._render("rosbag", path)
-                        return
-                print(f"ERROR: couldnt find {self._getConfig()["rosbag_type"]} file")
+        instruction = "usage: rosbag <foldername | idx> <bagfilename | episode_number>. Avaliable folders are:"
+        file = self._fileSelection(args, instruction, "rosbag")
 
-    # def complete_rosbag(self, text, line, begidx, endidx):
-    #     if line.find(" ") > begidx:
-    #         return []
-        
-    #     rosbag_dir = Path(self._getConfig()["zarr_dir"])
-    #     return [str(p) for p in rosbag_dir.iterdir() if p.name.startswith(text)]
-        
-    def do_info_rosbag(self, args):
-        """Prints meta data of a rosbag file. Args: foldername/number(optional)
-                foldername/number ->  name or number of the bagfile directory (not the .db3 itself but the directory it is in) Should be in rosbag data dir spesified in config. 
-            call \"info_rosbag\" to see all avaliable bagfile directory names/numbers."""
-        args = args.split()
-        if len(args) == 0:
-            # search 
-            print(f"call rosbag <number | groupname>. Avaliable folders are:")
-            self._printAvaliableRosbags(None)
-        else:
-            groupFile = self._getNameFromInput(args[0])
-            if len(args) == 1:  
-                print(f"call rosbag <number | groupname> <number | bagfoldername>. Avaliable folders are:")
-                self._printAvaliableRosbags(groupFile)
+        # render file
+        if file != None:
+            episode = 0
+            if len(args) < 2:
+                # print bag file with their sizes
+                self._printAvaliableFolders(file, print_size=True)
+                print("usage: rosbag <foldername | idx> <bagfilename | episode_number>. Avaliable bagfiles above:")
             else:
-                bagFile = self._getNameFromInput(args[1], groupFile)
-                dir = Path(self._getConfig()["rosbag_dir"]) / groupFile / bagFile
-                for item in dir.iterdir():
+                if args[1].isdigit():
+                    episode = int(args[1])
+                else:
+                    # get episode from name (so cursed)
+                    bagfile = self._getFileFromInput(file, args[1])
+                    for idx, p in enumerate(list(sorted([f for f in file.iterdir() if f.is_dir()]))):
+                        if p == bagfile:
+                            episode = idx
+
+                self.renderConfig["fileType"] = "rosbag"
+                self.renderConfig["filePath"] = file
+                self.renderConfig["episode"] = episode
+                self._render()
+
+    def do_info_rosbag(self, args):
+        """Prints metadata of a rosbag file. 
+            Args: <foldername | idx>, <bagfilename | episode_number>
+                foldername -> name or idx of the group folder
+                bagfilename -> name or idx of the spesific rosbag to show / episode number (idx == episode number)
+            Usage:
+                info_rosbag --> lists all avaliable folders in the rosbag dir
+                info_rosbag <foldername | idx> --> lists all avaliable bagfiles and their sizes
+                info_rosbag <foldername | idx> <bagfilename | episode_number> --> prints metadata of the rosbag you provided
+            """
+        
+        # get file from args
+        args = args.split()
+        instruction = "usage: info_rosbag <foldername | idx>. Avaliable folders are:"
+        file = self._fileSelection(args, instruction, "rosbag")
+        if file != None:
+            if len(args) < 2:
+                # print bag file with their sizes
+                self._printAvaliableFolders(file, print_size=True)
+                print("usage: info_rosbag <foldername | idx> <bagfilename | idx> to see metadata. Avaliable bagfiles above:")
+            else:
+                # print metadata of a spesific bag file
+                bagFolder = self._getFileFromInput(file, args[1])
+                for item in bagFolder.iterdir():
                     if item.name == "metadata.yaml":
                         with item.open("r") as file:
                             data = yaml.safe_load(file)
@@ -121,12 +150,42 @@ class REPL(Cmd):
                         return
                 print("Error: Metadata not found")
 
+    def complete_rosbag(self, text, line, begidx, endidx):
+        return self._autocomplete(text, line, begidx, endidx, "rosbag")
+    
+    def complete_rosbag_info(self, text, line, begidx, endidx):
+        return self._autocomplete(text, line, begidx, endidx, "rosbag")
+
+    def do_n(self, args):
+        '''Prints the next episode.
+            Usage:
+                n'''
+        if self.renderConfig["filePath"] == None:
+            print("render something using zarr or rosbags first")
+            return
+        
+        self.renderConfig["episode"] += 1
+        self._render()
+
+    def do_p(self, args):
+        '''Prints the previous episode.
+            Usage:
+                p'''
+        if self.renderConfig["filePath"] == None:
+            print("render something using zarr or rosbags first")
+            return
+        
+        self.renderConfig["episode"] -= 1
+        self._render()
+
+
     def do_info_config(self, args):
         """Prints the current configuration of the visualizer. Updates are reflected immediately upon next visualising call"""
         loaded_data = self._getConfig()
         for key, value in loaded_data.items():
             print(f"-- {key}\t\t{value}")
             
+
 
     def do_quit(self, args):
         """Quits the program."""
@@ -138,70 +197,123 @@ class REPL(Cmd):
     def postcmd(self, stop, line):
         print()
 
-    def _getNameFromInput(self, folder, prefix=None):
-        """ returns file name not path """
-        if folder.isdigit():
-            folder = int(folder)
-            if prefix != None:
-                rosbag_dir = Path(self._getConfig()["rosbag_dir"]) / prefix
-            else:
-                rosbag_dir = Path(self._getConfig()["rosbag_dir"])
-            folders = list(sorted(rosbag_dir.iterdir()))
-            if folder < 0 or folder >= len(folders):
-                print("ERROR: idx selection out of bounds.")
-                return
-            file = folders[folder].name
-        else:
-            file = folder
-        return file
+    
 
-    def _printAvaliableRosbags(self, level):
-        if level != None:
-            rosbag_dir = Path(self._getConfig()["rosbag_dir"]) / level
-        else:
-            rosbag_dir = Path(self._getConfig()["rosbag_dir"])
-        print("\tidx:\tsize:\tfoldername")
-        for idx, p in enumerate(sorted(rosbag_dir.iterdir())):
-            if p.is_dir():
-                size = 0
-                files = p.glob(f"*{self._getConfig()["rosbag_type"]}")
-                for file in files:
-                    size = file.stat().st_size/1e9
-                    break
-                print(f"\t{idx}\t{size:.2f}GB\t{p.name}")
+    def _render(self):
+        # check if anything in the current dict is non initalised
+        if None in self.renderConfig.values():
+            raise ValueError(f"render config dict is non initalised. dict = {self.renderConfig}")
 
-    def _printAvaliableZarrs(self):
-        zarr_dir = Path(self._getConfig()["zarr_dir"])
-        for p in zarr_dir.iterdir():
-            if p.is_dir():
-                print(f"\t{p.name}")
+        # check if episode range is sane
+        if self.renderConfig["fileType"] == "zarr":
+            max = zarr.open(str(self.renderConfig["filePath"]), mode="r")["meta"]["episode_ends"].shape[0]
+        elif self.renderConfig["fileType"] == "rosbag":
+            max = sum([1 for f in self.renderConfig["filePath"].iterdir() if f.is_dir()])
+        if self.renderConfig["episode"] < 0:
+            print(f"ERROR: episode: {self.renderConfig["episode"]} is out of range. Resetting to {0}")
+            self.renderConfig["episode"] = 0
+        if self.renderConfig["episode"]+1 > max:
+            print(f"ERROR: episode: {self.renderConfig["episode"]} is out of range. Resetting to {max-1}")
+            self.renderConfig["episode"] = max-1
 
-
-    def _render(self, type, name, args={}):
-        # get configs
-        self._recordingCount += 1
+        # get config
         loaded_data = self._getConfig()
-        for key, value in args.items():
-            loaded_data[key] = value
 
-        # find file
-        loaded_data["datapath"] = Path(loaded_data[f"{type}_dir"]) / name
-        if not loaded_data["datapath"].exists():
-            print("ERROR: file does not exist.")
-            return
+        # tick recording id (so that rerun registers this as a seperate episode)
+        self._recordingCount += 1
 
         # set up rerun
         rr.init(loaded_data["application_id"], recording_id=str(self._recordingCount))
         rr.spawn()
 
-        # make blueprint nice
+        # make viewer nice
+        group_name = self.renderConfig["filePath"].name
+        rr.send_recording_name(f"{self.renderConfig["episode"]} - {self.renderConfig["fileType"]}:{group_name}")
         rr.log_file_from_path(loaded_data["blueprint_path"])
 
-        # run respective loaders
-        if type == "zarr":
+        # run respective logger
+        if self.renderConfig["fileType"] == "zarr":
+            loaded_data["episode_select"] = [self.renderConfig["episode"], self.renderConfig["episode"]+1]
+            loaded_data["datapath"] = self.renderConfig["filePath"]
             render_zarr.render(loaded_data)
-        elif type == "rosbag":
+
+        elif self.renderConfig["fileType"] == "rosbag":
+            # convert group folder to individual 
+            loaded_data["datapath"] = self._getFileFromInput(self.renderConfig["filePath"], str(self.renderConfig["episode"]))
             render_rosbag.render(loaded_data)
+       
+    
+    def _fileSelection(self, args, instruction, type):
+        '''commander for selecting files '''
+        if len(args) == 0:
+            print(instruction)
+
+            # print avaliable folders
+            self._printAvaliableFolders(Path(self._getConfig()[f"{type}_dir"]))
+            return None
+        else:
+            return self._getFileFromInput(Path(self._getConfig()[f"{type}_dir"]), args[0])
+    
+    def _getFileFromInput(self, dir, name):
+        '''converts the args from a name or idx into a path object'''
+        if name.isdigit():
+            idx = int(name)
+            folders = list(sorted(dir.iterdir()))
+            if idx < 0 or idx >= len(folders):
+                print("ERROR: idx selection out of bounds.")
+                return None
+            return folders[idx]
+        else:
+            file = dir / name
+            if file.exists():
+                return file
+            print("ERROR: file name does not exist.")
+            return None
+            
+    def _printAvaliableFolders(self, data_dir, print_size=False):
+        '''prints FOLDERs only'''
+        if print_size:
+            print("\tidx:\tsize:\tfoldername")
+        else:
+            print("\tidx:\tfoldername")
+        for idx, p in enumerate(list(sorted([f for f in data_dir.iterdir() if f.is_dir()]))):
+            if p.is_dir():
+                if print_size:
+                    size = 0
+                    files = p.glob(f"*{self._getConfig()["rosbag_type"]}")
+                    for file in files:
+                        size = file.stat().st_size/1e9
+                        break
+                    print(f"\t{idx}\t{size:.2f}GB\t{p.name}")
+                else:
+                    print(f"\t{idx}:\t{p.name}")
+
+    def _autocomplete(self, text, line, begidx, endidx, type):
+        '''returns appropriate list for autocompleters'''
+        
+        if type == "zarr":
+            if line[:begidx].count(" ") <= 1:
+                # stage 1
+                dir = Path(self._getConfig()["zarr_dir"])
+                return [p.name for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
+            else:
+                # stage 2
+                return []
+            
+            
+        elif type == "rosbag":
+            if line[:begidx].count(" ") <= 1:
+                # stage 1
+                dir = Path(self._getConfig()["zarr_dir"])
+                return [p.name for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
+            else:
+                # stage 2
+                dir = self._getFileFromInput(Path(self._getConfig()["zarr_dir"]), line.split(" ")[1])
+                if dir == None:
+                    return [] 
+                return [p.name for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
+
+    
 
     def _getConfig(self):
         location = Path(__file__).parent / "config.yaml"
@@ -213,6 +325,7 @@ class REPL(Cmd):
             self.do_quit("")
 
     def _openDict(self, prefix, datas):
+        ''' recursively print a dict, mostly for a rosbag metadata.yaml dict tbh '''
         seperator = "  "
 
         if not isinstance(datas, list):
@@ -241,11 +354,19 @@ if __name__ == '__main__':
     prompt.intro = """
     Rerun Visualiser.
     Basic usage:
+
         help
-        zarr 
-        info_zarr
-        rosbag 
-        info_rosbag
-        info_config
+        
+        zarr <foldername | idx>, {episode_select}
+        rosbag <foldername | idx>, <bagfilename | episode_number>
+
+        info_zarr <foldername | idx> 
+        info_rosbag <foldername | idx>, <bagfilename | episode_number>
+
+    autocomplete avaliable.
+
+    !!!
+    Update --> you can now type "n" (for next) and "p" (for previous) to step through episodes. -siewling 
+    !!!
     """
     prompt.cmdloop()
