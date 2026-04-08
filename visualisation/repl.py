@@ -70,10 +70,10 @@ class REPL(Cmd):
             print(zarr.open(str(file), mode="r").tree())
 
     def complete_zarr(self, text, line, begidx, endidx):
-        return self._autocompleteZarr(text, line, begidx, endidx, "zarr")
+        return self._autocomplete(text, line, begidx, endidx, "zarr")
     
     def complete_zarr_info(self, text, line, begidx, endidx):
-        return self._autocompleteZarr(text, line, begidx, endidx, "zarr")
+        return self._autocomplete(text, line, begidx, endidx, "zarr")
 
 
 
@@ -194,6 +194,9 @@ class REPL(Cmd):
     def default(self, line):
         print("command not recognised. type help")
 
+    def emptyline(self):
+        pass
+
     def postcmd(self, stop, line):
         print()
 
@@ -258,7 +261,7 @@ class REPL(Cmd):
         '''converts the args from a name or idx into a path object'''
         if name.isdigit():
             idx = int(name)
-            folders = list(sorted(dir.iterdir()))
+            folders = list(sorted([f for f in dir.iterdir() if f.is_dir()]))
             if idx < 0 or idx >= len(folders):
                 print("ERROR: idx selection out of bounds.")
                 return None
@@ -304,15 +307,16 @@ class REPL(Cmd):
         elif type == "rosbag":
             if line[:begidx].count(" ") <= 1:
                 # stage 1
-                dir = Path(self._getConfig()["zarr_dir"])
+                dir = Path(self._getConfig()["rosbag_dir"])
                 return [p.name for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
-            else:
+            elif line[:begidx].count(" ") <= 2:
                 # stage 2
-                dir = self._getFileFromInput(Path(self._getConfig()["zarr_dir"]), line.split(" ")[1])
+                dir = self._getFileFromInput(Path(self._getConfig()["rosbag_dir"]), line.split(" ")[-1])
                 if dir == None:
                     return [] 
                 return [p.name for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
-
+            else:
+                return []
     
 
     def _getConfig(self):
@@ -369,4 +373,4 @@ if __name__ == '__main__':
     Update --> you can now type "n" (for next) and "p" (for previous) to step through episodes. -siewling 
     !!!
     """
-    prompt.cmdloop()
+    # prompt.cmdloop()
