@@ -311,7 +311,7 @@ class REPL(Cmd):
             if line[:begidx].count(" ") <= 1:
                 # stage 1
                 dir = Path(self._getConfig()["zarr_dir"])
-                return [p.name[endidx-begidx+1:] for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
+                return [p.name for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
             else:
                 # stage 2
                 return []
@@ -321,13 +321,13 @@ class REPL(Cmd):
             if line[:begidx].count(" ") <= 1:
                 # stage 1
                 dir = Path(self._getConfig()["rosbag_dir"])
-                return [p.name[endidx-begidx+1:] for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
+                return [p.name for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
             elif line[:begidx].count(" ") <= 2:
                 # stage 2
                 dir = self._getFileFromInput(Path(self._getConfig()["rosbag_dir"]), line.split(" ")[-2])
                 if dir == None:
                     return [] 
-                return [p.name[endidx-begidx+1:] for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
+                return [p.name for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
             else:
                 return []
     
@@ -365,6 +365,68 @@ class REPL(Cmd):
                     else:
                         print(f"{prefix}{key}: {value}")
 
+    def cmdloop(self, intro=None):
+        """Repeatedly issue a prompt, accept input, parse an initial prefix
+        off the received input, and dispatch to action methods, passing them
+        the remainder of the line as argument.
+
+        """
+
+        self.preloop()
+        if self.use_rawinput and self.completekey:
+            try:
+                import readline
+                self.old_completer = readline.get_completer()
+                readline.set_completer(self.complete)
+                if readline.backend == "editline":
+                    if self.completekey == 'tab':
+                        # libedit uses "^I" instead of "tab"
+                        command_string = "bind ^I rl_complete"
+                    else:
+                        command_string = f"bind {self.completekey} rl_complete"
+                else:
+                    command_string = f"{self.completekey}: complete"
+                readline.parse_and_bind(command_string)
+                # make it not take _ as a delim
+                old_delims = readline.get_completer_delims() # <-
+                readline.set_completer_delims(old_delims.replace('_', '')) # <-
+            except ImportError:
+                pass
+        try:
+            if intro is not None:
+                self.intro = intro
+            if self.intro:
+                self.stdout.write(str(self.intro)+"\n")
+            stop = None
+            while not stop:
+                if self.cmdqueue:
+                    line = self.cmdqueue.pop(0)
+                else:
+                    if self.use_rawinput:
+                        try:
+                            line = input(self.prompt)
+                        except EOFError:
+                            line = 'EOF'
+                    else:
+                        self.stdout.write(self.prompt)
+                        self.stdout.flush()
+                        line = self.stdin.readline()
+                        if not len(line):
+                            line = 'EOF'
+                        else:
+                            line = line.rstrip('\r\n')
+                line = self.precmd(line)
+                stop = self.onecmd(line)
+                stop = self.postcmd(stop, line)
+            self.postloop()
+        finally:
+            if self.use_rawinput and self.completekey:
+                try:
+                    import readline
+                    readline.set_completer(self.old_completer)
+                except ImportError:
+                    pass
+
 if __name__ == '__main__':
     prompt = REPL()
     prompt.prompt = '> '
@@ -386,5 +448,6 @@ if __name__ == '__main__':
     Update --> you can now type "n" (for next) and "p" (for previous) to step through episodes. -siewling 
     !!!
     """
+    
     prompt.cmdloop()
-    # print(prompt._autocomplete("group_o", "rosbag group_o", 7, 13, "zarr"))
+    # print(prompt._autocomplete("", "rosbag ", 7, 7, "rosbag"))
