@@ -389,7 +389,7 @@ class REPL(Cmd):
                 readline.parse_and_bind(command_string)
                 # make it not take _ as a delim
                 old_delims = readline.get_completer_delims() # <-
-                readline.set_completer_delims(old_delims.replace('_', '')) # <-
+                readline.set_completer_delims(old_delims.replace('-', '')) # <-
             except ImportError:
                 pass
         try:
