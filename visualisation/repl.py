@@ -101,7 +101,7 @@ class REPL(Cmd):
             episode = 0
             if len(args) < 2:
                 # print bag file with their sizes
-                self._printAvaliableFolders(file, print_size=True)
+                self._printAvaliableFolders(file, additonal_info="size")
                 print("usage: rosbag <foldername | idx> <bagfilename | episode_number>. Avaliable bagfiles above:")
             else:
                 if args[1].isdigit():
@@ -136,7 +136,7 @@ class REPL(Cmd):
         if file != None:
             if len(args) < 2:
                 # print bag file with their sizes
-                self._printAvaliableFolders(file, print_size=True)
+                self._printAvaliableFolders(file, additonal_info="size")
                 print("usage: info_rosbag <foldername | idx> <bagfilename | idx> to see metadata. Avaliable bagfiles above:")
             else:
                 # print metadata of a spesific bag file
@@ -209,7 +209,11 @@ class REPL(Cmd):
 
         # check if episode range is sane
         if self.renderConfig["fileType"] == "zarr":
-            max = zarr.open(str(self.renderConfig["filePath"]), mode="r")["meta"]["episode_ends"].shape[0]
+            try:
+                max = zarr.open(str(self.renderConfig["filePath"]), mode="r")["meta"]["episode_ends"].shape[0]
+            except:
+                print("WARNING: This dataset lacks episode ends. This is probably a big issue, but assuming each episode is about 300 frames, and not going to check for episode bounds.")
+                max = 100000
         elif self.renderConfig["fileType"] == "rosbag":
             max = sum([1 for f in self.renderConfig["filePath"].iterdir() if f.is_dir()])
         if self.renderConfig["episode"] < 0:
@@ -252,7 +256,10 @@ class REPL(Cmd):
             print(instruction)
 
             # print avaliable folders
-            self._printAvaliableFolders(Path(self._getConfig()[f"{type}_dir"]))
+            if type == "zarr":
+                self._printAvaliableFolders(Path(self._getConfig()[f"{type}_dir"]), additonal_info="episode number")
+            else:
+                self._printAvaliableFolders(Path(self._getConfig()[f"{type}_dir"]))
             return None
         else:
             return self._getFileFromInput(Path(self._getConfig()[f"{type}_dir"]), args[0])
@@ -273,21 +280,27 @@ class REPL(Cmd):
             print("ERROR: file name does not exist.")
             return None
             
-    def _printAvaliableFolders(self, data_dir, print_size=False):
+    def _printAvaliableFolders(self, data_dir, additonal_info=None):
         '''prints FOLDERs only'''
-        if print_size:
-            print("\tidx:\tsize:\tfoldername")
+        if not additonal_info == None:
+            print(f"\tidx:\t{additonal_info}:\tfoldername")
         else:
             print("\tidx:\tfoldername")
         for idx, p in enumerate(list(sorted([f for f in data_dir.iterdir() if f.is_dir()]))):
             if p.is_dir():
-                if print_size:
+                if additonal_info == "size":
                     size = 0
                     files = p.glob(f"*{self._getConfig()["rosbag_type"]}")
                     for file in files:
                         size = file.stat().st_size/1e9
                         break
                     print(f"\t{idx}\t{size:.2f}GB\t{p.name}")
+                elif additonal_info == "episode number":
+                    try:
+                        eps = zarr.open(str(p), mode="r")["meta"]["episode_ends"].shape[0]
+                    except:
+                        eps = -1
+                    print(f"\t{idx}\t{eps}\t{p.name}")
                 else:
                     print(f"\t{idx}:\t{p.name}")
 

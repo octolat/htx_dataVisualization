@@ -187,7 +187,12 @@ def unpackTransformObject(tf):
 
 
 def getEpisodeRange(file, episode_select):
-    episodes = file["meta"]["episode_ends"]
+    try:
+        episodes = file["meta"]["episode_ends"]
+    except:
+        print("WARNING: episode ends does not exist. assuming episode length of 300.")
+        rr.log("alerts", rr.TextLog(f"episode_ends does not exist!!!!! assuming epi length of 300"))
+        return (episode_select[0]*300, episode_select[1]*300, (episode_select[1]-episode_select[0])*300)
     if episodes.shape[0] < episode_select[1] or episode_select[0] < 0:
         raise ValueError(f"episode_select is out of range, there are only {episodes.shape[0]} episodes")
     
