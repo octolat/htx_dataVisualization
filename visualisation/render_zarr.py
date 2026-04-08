@@ -20,7 +20,6 @@ def render(configs):
     episode_select = configs["episode_select"]
     scene_path = Path(configs["scene_path"])
     urdf_path, gripper_urdf_path = Path(configs["urdf_path"]), Path(configs["gripper_urdf_path"])
-    blueprint_path = Path(configs["blueprint_path"])
     point_radii = configs["point_radii"]
     point_colorscheme = configs["point_colorscheme"]
 
@@ -84,11 +83,13 @@ def render(configs):
 
     # log transforms
     for side, acts in act_dict.items():
-        arm_transforms = gripper_transforms = {}
-        for dict in (arm_transforms, gripper_transforms):
-            for key in ("translation","quaternion","child_frame","parent_frame"):
-                dict[key] = []
-
+        # init the dictionary with the list of keys
+        transforms = {
+            "translation": [],
+            "quaternion": [],
+            "child_frame": [],
+            "parent_frame": [],
+        }
         arm_acts, gripper_acts = acts
         for arm_act, gripper_act in zip(arm_acts, gripper_acts):
             
@@ -102,7 +103,7 @@ def render(configs):
                 joint = tree_joints[side]["arm"][i]
                 params = unpackTransformObject(joint.compute_transform(joint_act))
                 for key, value in params.items():
-                    arm_transforms[key].append(value)
+                    transforms[key].append(value)
 
             # compute gripper
             for joint, multiplier, offset in tree_joints[side]["gripper"]:
@@ -110,17 +111,17 @@ def render(configs):
                 tf = joint.compute_transform(gripper_act * multiplier + offset)
                 params = unpackTransformObject(tf)
                 for key, value in params.items():
-                    gripper_transforms[key].append(value)
+                    transforms[key].append(value)
 
         # send to rerun
         rr.send_columns(
             f"{side}/transforms",
             indexes=[rr.TimeColumn(times_name, sequence=times.repeat(joint_count))],
             columns=rr.Transform3D.columns(
-                translation=arm_transforms["translation"],
-                quaternion=arm_transforms["quaternion"],
-                child_frame=arm_transforms["child_frame"],
-                parent_frame=arm_transforms["parent_frame"],
+                translation=transforms["translation"],
+                quaternion=transforms["quaternion"],
+                child_frame=transforms["child_frame"],
+                parent_frame=transforms["parent_frame"],
             ),
         )
     if print_times: print(f"transforms: {time.time()-per}")
@@ -144,7 +145,7 @@ def render(configs):
     # log point 
     points = file["data"]["point_cloud"][epi_start:epi_end]
     xyz = points[:, :, :3] # array goes [x,y,z, r,g,b]
-    colors = createHeatMap(points[:, :, 2], 0.0, 1.5)
+    colors = createHeatMap(points[:, :, 2], 0.0, 1.5) # only z rows
     
     rr.send_columns(
         "/camera/depth/color/points",
@@ -189,6 +190,7 @@ def getEpisodeRange(file, episode_select):
     episodes = file["meta"]["episode_ends"]
     if episodes.shape[0] < episode_select[1] or episode_select[0] < 0:
         raise ValueError(f"episode_select is out of range, there are only {episodes.shape[0]} episodes")
+    
     if episode_select[0] == 0: 
         epi_start = 0
     else: 
