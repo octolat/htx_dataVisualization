@@ -311,7 +311,7 @@ class REPL(Cmd):
             if line[:begidx].count(" ") <= 1:
                 # stage 1
                 dir = Path(self._getConfig()["zarr_dir"])
-                return [p.name for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
+                return [p.name[endidx-begidx+1:] for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
             else:
                 # stage 2
                 return []
@@ -321,13 +321,13 @@ class REPL(Cmd):
             if line[:begidx].count(" ") <= 1:
                 # stage 1
                 dir = Path(self._getConfig()["rosbag_dir"])
-                return [p.name for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
+                return [p.name[endidx-begidx+1:] for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
             elif line[:begidx].count(" ") <= 2:
                 # stage 2
-                dir = self._getFileFromInput(Path(self._getConfig()["rosbag_dir"]), line.split(" ")[-1])
+                dir = self._getFileFromInput(Path(self._getConfig()["rosbag_dir"]), line.split(" ")[-2])
                 if dir == None:
                     return [] 
-                return [p.name for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
+                return [p.name[endidx-begidx+1:] for p in dir.iterdir() if p.name.startswith(text) and p.is_dir()]
             else:
                 return []
     
@@ -387,3 +387,4 @@ if __name__ == '__main__':
     !!!
     """
     prompt.cmdloop()
+    # print(prompt._autocomplete("group_o", "rosbag group_o", 7, 13, "zarr"))
