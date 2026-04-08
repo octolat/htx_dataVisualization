@@ -14,5 +14,6 @@ docker run --runtime=nvidia \
 	   -v $XAUTH:$XAUTH \
 	   -e XAUTHORITY=$XAUTH \
 	   --volume "./visualisation/config.yaml:/src/visualisation/config.yaml" \
-	   --volume "./visualisation/data:/src/visualisation/data" \
+	   --volume "./visualisation/data/rosbags:/src/visualisation/data/rosbags" \
+	   --volume "./visualisation/data/zarrfiles:/src/visualisation/data/zarrfiles" \
 	   rerun:0.30.0
