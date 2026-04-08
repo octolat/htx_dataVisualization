@@ -20,7 +20,6 @@ def render(configs):
     print_times = configs["print_times"]
     scene_path = Path(configs["scene_path"])
     urdf_path, gripper_urdf_path = Path(configs["urdf_path"]), Path(configs["gripper_urdf_path"])
-    blueprint_path = Path(configs["blueprint_path"])
     point_radii = configs["point_radii"]
     point_colorscheme = configs["point_colorscheme"]
     dof = configs["arm_dof"]
